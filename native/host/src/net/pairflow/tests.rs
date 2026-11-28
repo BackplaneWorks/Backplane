@@ -199,3 +199,49 @@ fn clocked(n: &Node, host: &str, t: Arc<AtomicU64>) -> Peering {
     assert_eq!(normalize("box.t1.ts.net").as_deref(), Some("https://box.t1.ts.net"));
     assert!(normalize("").is_none() && normalize("http://x?y=1").is_none() && normalize("a b").is_none());
 }
+
+fn page_rows(n: &Node) -> Vec<Value> { crate::net::machinespage::rows(&n.p.page_data(), &|_| String::new()) }
+async fn press_pair(n: &Node, addr: &str, code: &str) -> Result<Value, String> {
+    crate::net::machinespage::act(&n.p, &n.hub, "machine-pair", "", &json!({"maddr": addr, "mcode": code})).await
+}
+
+#[tokio::test] async fn a_pairing_that_cannot_start_is_shown_with_its_reason() {
+    let b = node("fail1", false).await;
+    let e = press_pair(&b, "http://127.0.0.1:9", "ABCDEFGH").await.unwrap_err();
+    assert!(e.contains("does not answer"), "{e}");
+    let rows = page_rows(&b);
+    let form = rows.iter().position(|r| r["label"] == "Pair a machine").unwrap();
+    let at = rows.iter().position(|r| r["label"] == "Pairing with http://127.0.0.1:9").expect("a row for the attempt");
+    assert_eq!(at, form + 1, "directly under the form: {rows:?}");
+    let note = rows[at]["note"].as_str().unwrap();
+    assert!(note.contains("does not answer") && !note.starts_with("refused"), "{note}");
+    assert_eq!(rows[at]["tone"], "bad");
+}
+
+#[tokio::test] async fn a_new_attempt_replaces_the_old_row_for_that_address() {
+    let (a, b) = (node("fail2a", false).await, node("fail2b", false).await);
+    press_pair(&b, "http://127.0.0.1:9", "ABCDEFGH").await.unwrap_err();
+    press_pair(&b, "http://127.0.0.1:9/", "ABCDEFGH").await.unwrap_err();
+    let pairing = |n: &Node| page_rows(n).into_iter().filter(|r| r["label"].as_str().unwrap_or("").starts_with("Pairing")).collect::<Vec<_>>();
+    assert_eq!(pairing(&b).len(), 1, "one row per address: {:?}", pairing(&b));
+    // a wrong code is said in words, and the stale row for the other address goes
+    a.p.make_code().await.unwrap();
+    let e = press_pair(&b, &url(&a), "WRONGONE").await.unwrap_err();
+    assert!(e.contains("not the one the other machine shows") && !e.contains("403"), "{e}");
+    let rows = pairing(&b);
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0]["label"], format!("Pairing with {}", url(&a)));
+}
+
+#[tokio::test] async fn an_empty_code_is_said_under_the_form() {
+    let b = node("fail3", false).await;
+    let e = press_pair(&b, "http://127.0.0.1:9", "").await.unwrap_err();
+    assert!(e.contains("enter the code"), "{e}");
+    assert!(page_rows(&b).iter().any(|r| r["label"] == "Pairing with http://127.0.0.1:9" && r["note"].as_str().unwrap().contains("enter the code") && r["tone"] == "bad"));
+    // nothing typed at all: no address to name
+    press_pair(&b, "", "").await.unwrap_err();
+    let rows = page_rows(&b);
+    let form = rows.iter().position(|r| r["label"] == "Pair a machine").unwrap();
+    assert_eq!(rows[form + 1]["label"], "Pairing", "{rows:?}");
+    assert!(rows[form + 1]["note"].as_str().unwrap().starts_with("that is not an address"));
+}

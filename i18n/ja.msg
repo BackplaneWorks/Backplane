@@ -3607,6 +3607,7 @@ android.hub.machines.err.address = アドレスではありません（例: http
 android.hub.machines.err.nocode = 相手のマシンに表示されたコードを入力してください
 android.hub.machines.err.already = そのマシンとはすでにリンク済みです
 android.hub.machines.err.noanswer = {address}が応答しません
+android.hub.machines.err.wrongcode = そのコードは相手のマシンに表示されているものではないか、期限切れです
 android.hub.machines.err.nothing = 相手のマシンから使える応答がありませんでした
 android.hub.machines.err.attempt = 不明なペアリング試行です
 android.hub.machines.err.invites = 有効な招待が多すぎます。どれかが期限切れになるのを待つか、設定 > デバイスで取り消してください

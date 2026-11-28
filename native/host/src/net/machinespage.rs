@@ -54,13 +54,6 @@ pub fn rows(d: &Value, draft: &dyn Fn(&str) -> String) -> Vec<Value> {
         r.push(row(&format!("{} wants to pair", s(q, "name")), &format!("{} · check code {} (it must match the one on that machine) · {}s left", s(q, "url"), s(q, "check"), q["left"].as_u64().unwrap_or(0)),
             vec![btn("Approve", "machine-approve", s(q, "id"), true), btn("Deny", "machine-deny", s(q, "id"), false)]));
     }
-    for o in d["outgoing"].as_array().into_iter().flatten() {
-        let st = s(o, "status");
-        let note = if st == "waiting" { format!("Approve it on that machine. Check code {}.", s(o, "check")) } else { st.to_string() };
-        let mut x = row(&format!("Pairing with {}", s(o, "address")), &note, vec![]);
-        if st.starts_with("refused") { x["tone"] = json!("bad") }
-        r.push(x);
-    }
     for f in d["found"].as_array().into_iter().flatten() {
         let mut x = row(s(f, "name"), &format!("{} · found on the network{}", s(f, "url"), if f["same_user"] == false { ", another account's" } else { "" }), vec![btn("Pair", "machine-pair", s(f, "url"), true)]);
         x["fields"] = json!([field("fcode", "Code from that machine", &draft("fcode"))]);
@@ -69,6 +62,17 @@ pub fn rows(d: &Value, draft: &dyn Fn(&str) -> String) -> Vec<Value> {
     let mut p = row("Pair a machine", "Enter the other machine's address and the code it made. It then asks you there to approve.", vec![btn("Pair", "machine-pair", "", true)]);
     p["fields"] = json!([field("maddr", "Address (https://box.example.ts.net or http://box:3787)", &draft("maddr")), field("mcode", "Code", &draft("mcode"))]);
     r.push(p);
+    // attempts made from here: under the form, so the form does not move when one appears
+    for o in d["outgoing"].as_array().into_iter().flatten() {
+        let st = s(o, "status");
+        // a pairing that never started says only its reason; one the other machine refused says so
+        let failed = st.strip_prefix("failed: ");
+        let note = if st == "waiting" { format!("Approve it on that machine. Check code {}.", s(o, "check")) } else { failed.unwrap_or(st).to_string() };
+        let label = if s(o, "address").is_empty() { "Pairing".to_string() } else { format!("Pairing with {}", s(o, "address")) };
+        let mut x = row(&label, &note, vec![]);
+        if st.starts_with("refused") || failed.is_some() { x["tone"] = json!("bad") }
+        r.push(x);
+    }
     let c = &d["code"];
     r.push(if c.is_object() {
         {
@@ -105,7 +109,7 @@ pub async fn act(p: &Arc<Peering>, hub: &Arc<Hub>, action: &str, value: &str, fi
         }
         "machine-introduce" => {
             let (via, url) = value.split_once('\u{1f}').ok_or("which machine?")?;
-            p.introduce(hub, via, url).await.map(|(id, check)| json!({"attempt": id, "check": check}))
+            p.introduce(hub, via, url).await.map(|(id, check)| json!({"attempt": id, "check": check})).inspect_err(|e| p.pair_failed(url, e))
         }
         "machine-rename" => {
             let (from, to) = (f("rfrom"), f("rname"));
@@ -121,10 +125,11 @@ pub async fn act(p: &Arc<Peering>, hub: &Arc<Hub>, action: &str, value: &str, fi
             let (addr, code) = if value.is_empty() { (f("maddr"), f("mcode")) } else { (value.to_string(), f("fcode")) };
             if addr.starts_with("bp1:") || code.starts_with("bp1:") {
                 let inv = if addr.starts_with("bp1:") { addr } else { code };
-                let i = sign::invite_parse(&inv).ok_or("not an invite")?;
-                return p.join(hub, &i, "").await.map(|(_, n)| json!({"linked": n}));
+                let Some(i) = sign::invite_parse(&inv) else { p.pair_failed("", "not an invite"); return Err("not an invite".into()) };
+                return p.join(hub, &i, "").await.map(|(_, n)| json!({"linked": n})).inspect_err(|e| p.pair_failed(&i.url, e));
             }
-            p.pair_with(hub, &addr, &code).await.map(|(id, check)| json!({"attempt": id, "check": check}))
+            // (the reason is also the reply's error; the page keeps it as a row because Settings shows no reply)
+            p.pair_with(hub, &addr, &code).await.map(|(id, check)| json!({"attempt": id, "check": check})).inspect_err(|e| p.pair_failed(&addr, e))
         }
         _ => Err("unknown action".into()),
     }

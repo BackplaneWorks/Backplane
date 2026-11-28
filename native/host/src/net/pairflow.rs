@@ -24,7 +24,8 @@ enum In { Pending, Approved(String), Denied }
 #[derive(Clone, Debug)]
 struct Incoming { id: String, peer: String, name: String, url: String, check: String, at: u64, poll: String, state: In }
 #[derive(Clone, PartialEq, Debug)]
-enum Out { Waiting, Linked(String), Refused(String) }
+/// `Failed`: the attempt never reached a waiting request (no answer, a wrong code, not an address): the reason, said under the form.
+enum Out { Waiting, Linked(String), Refused(String), Failed(String) }
 #[derive(Clone, Debug)]
 struct Outgoing { id: String, address: String, check: String, at: u64, state: Out }
 #[derive(Clone, Debug)]
@@ -171,17 +172,35 @@ impl Peering {
         let body = json!({"code": code.trim(), "name": me, "url": here, "check": check}).to_string();
         let r = botnet::post_json(&self.home, &format!("{base}/bots/pair/request"), &body).await;
         if r.code != 200 {
-            return Err(match r.code { 0 => format!("{base} does not answer"), c => format!("{} ({c})", r.body.trim().chars().take(200).collect::<String>()) });
+            return Err(match (r.code, r.body.trim()) {
+                (0, _) => format!("{base} does not answer"),
+                // (claim_reason's words: an older hub says only "wrong code")
+                (403, "wrong code") => "that code is not the one the other machine shows, or it has expired".into(),
+                (400 | 403 | 429, b) if !b.is_empty() && !b.starts_with(['{', '<']) => b.chars().take(200).collect(),
+                (c, b) => format!("{} ({c})", b.chars().take(200).collect::<String>()),
+            });
         }
         let j: Value = serde_json::from_str(&r.body).map_err(|_| "the other machine answered nothing usable".to_string())?;
         let (rid, poll) = (j["id"].as_str().unwrap_or("").to_string(), j["poll"].as_str().unwrap_or("").to_string());
         if rid.is_empty() || poll.is_empty() { return Err("the other machine answered nothing usable".into()) }
         let id = hex::encode(urandom(6));
-        self.flow.inner.lock().unwrap().outgoing.push(Outgoing { id: id.clone(), address: base.clone(), check: check.clone(), at: self.now_s(), state: Out::Waiting });
+        self.attempt_push(Outgoing { id: id.clone(), address: base.clone(), check: check.clone(), at: self.now_s(), state: Out::Waiting });
         let (me, hub) = (self.clone(), hub.clone());
         let attempt = id.clone();
         tokio::spawn(async move { let end = me.wait_for(&hub, &base, &rid, &poll).await; me.finish(&attempt, end) });
         Ok((id, check))
+    }
+    /// A new attempt: it replaces the finished row for the same address, and finished refusals before it go, so an old answer
+    /// never reads as this one's.
+    fn attempt_push(&self, o: Outgoing) {
+        let mut g = self.flow.inner.lock().unwrap();
+        g.outgoing.retain(|x| match x.state { Out::Waiting => true, Out::Linked(_) => x.address != o.address, Out::Refused(_) | Out::Failed(_) => false });
+        g.outgoing.push(o);
+    }
+    /// A pairing from the page that could not start: kept as an attempt so the page says why (`address` as typed; normalized when it is one).
+    pub fn pair_failed(&self, address: &str, why: &str) {
+        let address = normalize(address).unwrap_or_else(|| address.trim().to_string());
+        self.attempt_push(Outgoing { id: hex::encode(urandom(6)), address, check: String::new(), at: self.now_s(), state: Out::Failed(why.to_string()) });
     }
     fn finish(&self, id: &str, end: Out) {
         let mut g = self.flow.inner.lock().unwrap();
@@ -217,6 +236,7 @@ impl Peering {
             Some(Out::Waiting) => json!({"state": "waiting"}),
             Some(Out::Linked(n)) => json!({"state": "linked", "name": n}),
             Some(Out::Refused(e)) => json!({"state": "refused", "error": e}),
+            Some(Out::Failed(e)) => json!({"state": "failed", "error": e}),
             None => json!({"state": "refused", "error": "unknown attempt"}),
         }
     }
@@ -280,7 +300,7 @@ impl Peering {
     }
 }
 fn self_state(s: &Out) -> Value {
-    match s { Out::Waiting => json!("waiting"), Out::Linked(n) => json!(format!("linked: {n}")), Out::Refused(e) => json!(format!("refused: {e}")) }
+    match s { Out::Waiting => json!("waiting"), Out::Linked(n) => json!(format!("linked: {n}")), Out::Refused(e) => json!(format!("refused: {e}")), Out::Failed(e) => json!(format!("failed: {e}")) }
 }
 
 #[cfg(test)]

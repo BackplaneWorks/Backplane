@@ -3584,6 +3584,7 @@ android.hub.machines.err.address = that is not an address (like http://box.examp
 android.hub.machines.err.nocode = enter the code the other machine shows
 android.hub.machines.err.already = already linked to that machine
 android.hub.machines.err.noanswer = {address} does not answer
+android.hub.machines.err.wrongcode = that code is not the one the other machine shows, or it has expired
 android.hub.machines.err.nothing = the other machine answered nothing usable
 android.hub.machines.err.attempt = unknown attempt
 android.hub.machines.err.invites = too many open invites: wait for one to expire, or revoke one in Settings > Devices

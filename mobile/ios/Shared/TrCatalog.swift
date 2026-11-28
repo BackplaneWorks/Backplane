@@ -3973,6 +3973,7 @@ android.hub.machines.err.address	that is not an address (like http://box.example
 android.hub.machines.err.nocode	enter the code the other machine shows	相手のマシンに表示されたコードを入力してください	introduce el código que muestra la otra máquina
 android.hub.machines.err.already	already linked to that machine	そのマシンとはすでにリンク済みです	ya vinculada a esa máquina
 android.hub.machines.err.noanswer	{address} does not answer	{address}が応答しません	{address} no responde
+android.hub.machines.err.wrongcode	that code is not the one the other machine shows, or it has expired	そのコードは相手のマシンに表示されているものではないか、期限切れです	ese código no es el que muestra la otra máquina, o ha caducado
 android.hub.machines.err.nothing	the other machine answered nothing usable	相手のマシンから使える応答がありませんでした	la otra máquina no respondió nada utilizable
 android.hub.machines.err.attempt	unknown attempt	不明なペアリング試行です	intento desconocido
 android.hub.machines.err.invites	too many open invites: wait for one to expire, or revoke one in Settings > Devices	有効な招待が多すぎます。どれかが期限切れになるのを待つか、設定 > デバイスで取り消してください	demasiadas invitaciones abiertas: espera a que caduque una o revoca una en Ajustes > Dispositivos

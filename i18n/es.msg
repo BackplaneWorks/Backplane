@@ -3585,6 +3585,7 @@ android.hub.machines.err.address = eso no es una dirección (como http://box.exa
 android.hub.machines.err.nocode = introduce el código que muestra la otra máquina
 android.hub.machines.err.already = ya vinculada a esa máquina
 android.hub.machines.err.noanswer = {address} no responde
+android.hub.machines.err.wrongcode = ese código no es el que muestra la otra máquina, o ha caducado
 android.hub.machines.err.nothing = la otra máquina no respondió nada utilizable
 android.hub.machines.err.attempt = intento desconocido
 android.hub.machines.err.invites = demasiadas invitaciones abiertas: espera a que caduque una o revoca una en Ajustes > Dispositivos
