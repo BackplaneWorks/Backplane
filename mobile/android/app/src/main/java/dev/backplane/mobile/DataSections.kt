@@ -715,12 +715,15 @@ private fun ProjectNote(title: String, tag: String, empty: String, load: suspend
 @Composable
 fun SectionRename(s: DSection, close: () -> Unit) { TextPrompt(Msg.sidebar_sections_rename, s.title, Msg.menu_rename, close) { DataClient.sidebarAct("group-rename", s.group + "\u001f" + it) } }
 
+/** Each project page's open folds ("<key>/done", "<key>/older") for this app run: the page comes back as it was left after a thread opened from it. */
+private val pageFolds = androidx.compose.runtime.mutableStateMapOf<String, Boolean>()
+
 /** A project's page: running, then needs you, then recent, then Done (n) folded; every machine's threads. */
 @Composable
 fun ProjectPageScreen(p: DSecRow, open: (String) -> Unit, newThread: (String) -> Unit, openSwarm: (String) -> Unit = {}, openViewer: (String) -> Unit = {}, back: () -> Unit) {
-    var done by remember { mutableStateOf(false) }
+    val done = pageFolds[p.key + "/done"] == true
     // a long Done list: its newest rows, the rest behind the hub's "Older (m)" (`page-older`)
-    var older by remember { mutableStateOf(false) }
+    val older = pageFolds[p.key + "/older"] == true
     var lists by remember { mutableStateOf<List<DSection>?>(null) }
     // record this visit on the hub so the Recent bench order follows this phone too
     LaunchedEffect(p.key) { DataClient.visitProject(p.key) }
@@ -779,7 +782,7 @@ fun ProjectPageScreen(p: DSecRow, open: (String) -> Unit, newThread: (String) ->
             for (s in ls) {
                 if (s.rows.isEmpty() && !(s.fold && s.count > 0)) continue
                 item("pg:${s.id}") {
-                    Row(Modifier.fillMaxWidth().height(36.dp).clickable(enabled = s.fold) { if (s.toggle == "page-older") older = !older else done = !done }.padding(start = 12.dp, top = 6.dp).testTag("project.page.${s.id}"), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.fillMaxWidth().height(36.dp).clickable(enabled = s.fold) { if (s.toggle == "page-older") pageFolds[p.key + "/older"] = !older else pageFolds[p.key + "/done"] = !done }.padding(start = 12.dp, top = 6.dp).testTag("project.page.${s.id}"), verticalAlignment = Alignment.CenterVertically) {
                         if (s.fold) { Icon(if (s.open) Icons.Default.ExpandMore else Icons.Default.ChevronRight, null, tint = dcs.onSurfaceVariant, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)) }
                         DMono(Tr.t(s.title).uppercase(), dcs.onSurfaceVariant, 11)
                     }

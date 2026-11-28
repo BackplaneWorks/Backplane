@@ -442,13 +442,14 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
     var projSheet by remember { mutableStateOf(false) }
     var pickNew by remember { mutableStateOf<DProject?>(null) }
     var newSwarm by remember { mutableStateOf<DProject?>(null) }   // New swarm's sheet, from a project's menu   // a project on more than one machine: where the new thread starts
-    // a project's page (sections), over the list until Back; kept outside the screen (homeSecPage) so Back from a thread it opened comes back to it
+    // a project's page (sections), over the list until Back; kept outside the screen (homeSecPage) so Back from a thread it opened comes back to it,
+    // and from a New thread or swarm started on it (left open under them, so Back from those lands on it, then the Bench)
     val secPage = homeSecPage?.takeIf { it.first == DataClient.usingKey }?.second
     fun showSec(r: DSecRow?) { homeSecPage = r?.let { DataClient.usingKey to it } }
     var secMenu by remember { mutableStateOf<DSecRow?>(null) }
     var secRename by remember { mutableStateOf<DSection?>(null) }
     var secNewSwarm by remember { mutableStateOf<String?>(null) }   // New swarm from a section project's menu (a project id)
-    secPage?.let { p -> androidx.activity.compose.BackHandler { showSec(null) }; ProjectPageScreen(p, open, { id -> showSec(null); newThread(id) }, { room -> showSec(null); openSwarm(room) }, openViewer) { showSec(null) }; return }
+    secPage?.let { p -> androidx.activity.compose.BackHandler { showSec(null) }; ProjectPageScreen(p, open, newThread, openSwarm, openViewer) { showSec(null) }; return }
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val prefs = remember { ctx.getSharedPreferences("data.ui", android.content.Context.MODE_PRIVATE) }
     var shut by remember { mutableStateOf(prefs.getStringSet("projects.shut", emptySet())!!.toSet()) }
