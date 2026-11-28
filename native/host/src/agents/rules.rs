@@ -126,8 +126,15 @@ pub fn rec_quote(x: &str) -> String { let l = x.split('\n').next().unwrap_or("")
 pub fn unanswered(kind: &str, tool: &str, detail: &str) -> String {
     match kind { "input" => format!(" Its question was not answered{}", rec_quote(detail)), "approval" => format!(" Its request to use {tool} was not answered{}", rec_quote(detail)), "plan" => " Its plan was not answered.".into(), _ => " Its request was not answered.".into() }
 }
-/// Exit.why: a SIGKILL (137) is most likely the kernel taking the process for memory.
-pub fn exit_why(code: i32) -> String { if code == 137 { "agent was killed (signal 9, likely out of memory)".into() } else { format!("agent exited with code {code}") } }
+/// Exit.why: a SIGKILL (137) is most likely the kernel taking the process for memory; a SIGTERM (143) is the computer shutting down or logging
+/// out (or something stopping the agent from outside), which a person reading "exited with code 143" cannot tell from a failed design.
+pub fn exit_why(code: i32) -> String {
+    match code {
+        137 => "agent was killed (signal 9, likely out of memory)".into(),
+        143 => "agent was stopped from outside (signal 15, as when the computer shuts down or logs out). Retry goes on from here.".into(),
+        _ => format!("agent exited with code {code}"),
+    }
+}
 
 /// Err.scrub: the text with its secrets dropped (token=/key=/secret=/password= values, Bearer tokens, key-shaped words).
 pub fn err_scrub(s: &str) -> String {
@@ -284,6 +291,7 @@ mod tests {
     }
     #[test] fn unanswered_asks_are_named() { assert_eq!(unanswered("approval", "Bash", "ls -la\nx"), " Its request to use Bash was not answered: \u{201C}ls -la\u{201D}"); assert_eq!(unanswered("plan", "", ""), " Its plan was not answered."); assert_eq!(unanswered("input", "", " "), " Its question was not answered"); assert_eq!(unanswered("x", "", ""), " Its request was not answered."); }
     #[test] fn a_sigkill_is_named() { assert!(exit_why(137).contains("signal 9")); assert_eq!(exit_why(3), "agent exited with code 3"); }
+    #[test] fn a_sigterm_says_it_was_stopped_from_outside_and_that_retry_goes_on() { let w = exit_why(143); assert!(w.contains("signal 15") && w.contains("Retry") && !w.contains("code 143"), "{w}"); }
     #[test] fn the_rules_block_is_text_for_the_rules_that_apply() {
         let mut st = std::collections::HashMap::new();
         st.insert("rule.r1".to_string(), r#"{"id":"r1","text":"Never push to main","at":5}"#.to_string());

@@ -171,6 +171,9 @@ pub enum PaneStatus {
     Stopped,
 }
 
+/// The header's Full screen / Pop out / Bring back: only with a SolidCraft window, in the pane or popped out.
+pub fn window_tools(st: &PaneStatus) -> bool { matches!(st, PaneStatus::Ready | PaneStatus::PoppedOut) }
+
 pub fn pane_status(info: &Value, has_child: bool, popped: bool) -> PaneStatus {
     if popped {
         return PaneStatus::PoppedOut;
@@ -654,6 +657,10 @@ impl SolidCraftPane {
             popped_elsewhere(self.popped, self.toplevel, self.home),
         )
     }
+
+    /// Whether SolidCraft's window is there to be made full screen, popped out or brought back (the Mech header's window buttons):
+    /// not on the not-installed, installing, starting or could-not-start screens.
+    pub fn has_window(&self) -> bool { window_tools(&self.status()) }
 
     pub fn settled(&self) -> Option<&'static str> {
         match self.status() {
@@ -1638,6 +1645,23 @@ impl Render for SolidCraftPane {
                             cx.notify();
                         })),
                     )
+                    // a SolidCraft that will not start: the part in Backplane's own viewer, as on the not-installed screen (no "Always" tick here)
+                    .child(
+                        crate::ui::with_rect(
+                            div().id("solidcraft-failed-view-native"),
+                            || "solidcraft:view_native".to_string(),
+                        )
+                        .px_3()
+                        .py_1()
+                        .border_1()
+                        .border_color(c("line"))
+                        .bg(c("raise"))
+                        .text_color(c("text"))
+                        .cursor_pointer()
+                        .hover(|s| s.bg(c("panel")))
+                        .child(trs("View directly in Backplane instead"))
+                        .on_click(cx.listener(|_, _, _, cx| cx.emit(SolidCraftEvent::ViewNative(false)))),
+                    )
                     .into_any_element(),
             ),
         };
@@ -2308,6 +2332,15 @@ mod tests {
         assert!(!container_visible(true, false, false, true), "hidden without valid bounds");
         assert!(!container_visible(true, false, true, false), "hidden before SolidCraft window is adopted");
         assert!(container_visible(true, false, true, true));
+    }
+
+    #[test]
+    fn window_buttons_only_with_a_solidcraft_window() {
+        assert!(window_tools(&PaneStatus::Ready));
+        assert!(window_tools(&PaneStatus::PoppedOut));
+        for st in [PaneStatus::NotInstalled, PaneStatus::Stopped, PaneStatus::Failed("x".into()), PaneStatus::Starting("x".into()), PaneStatus::Unresponsive("x".into()), PaneStatus::Installing { done: 1, total: 2 }] {
+            assert!(!window_tools(&st), "{st:?}");
+        }
     }
 
     #[test]
