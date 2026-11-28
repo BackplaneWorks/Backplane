@@ -423,6 +423,8 @@ impl Backplane {
                 let row_scope = if inbox { "in" } else { "pr" };
                 let pin_group = SharedString::from(format!("row-{row_scope}-{id}"));
                 let gutter = if inbox { 10. } else { gutter };
+                // its title box takes the row's whole text width: the hover buttons, the machine, the label and the age step aside while it is open
+                let renaming = crate::screens::siderow::renaming(&self.data, &id, "thread");
                 { let (snz, wake) = (&t["snooze"], string(t, "wake"));
                   if !wake.is_empty() { ctl.push(CtlEntry { id: format!("wake:{raw}"), label: "Wake".into() /* i18n-ok: a ctl label */, ctl: Ctl::Node("row-snooze".into(), wake) }); }
                   for o in snz.as_array().into_iter().flatten() { ctl.push(CtlEntry { id: format!("snooze:{raw}:{}", string(o, "label")), label: format!("Snooze {}", string(o, "label")) /* i18n-ok: a ctl label */, ctl: Ctl::Node("row-snooze".into(), string(o, "value")) }); } }
@@ -443,7 +445,7 @@ impl Backplane {
                     // as the project's own; the open one's L a shade brighter
                     .child(toggle.map_or_else(|| div().w(px(gutter)).h_full().flex_shrink_0().relative().when(under, |d| { let l = c(if selected { "dim" } else { "line" });
                         d.child(div().absolute().left(px(36.)).top_0().w(px(1.)).h(relative(0.5)).bg(l))
-                         .child(div().absolute().left(px(36.)).top(relative(0.5)).w(px(11.)).h(px(1.)).bg(l)) }).into_any_element(), |t| t.into_any_element())).children((!labelled).then(|| crate::screens::siderow::dot(light, t))).child(if crate::screens::siderow::renaming(&self.data, &id, "thread") { crate::screens::siderow::field(light, &self.screens.fields, &id) } else if inbox {
+                         .child(div().absolute().left(px(36.)).top(relative(0.5)).w(px(11.)).h(px(1.)).bg(l)) }).into_any_element(), |t| t.into_any_element())).children((!labelled).then(|| crate::screens::siderow::dot(light, t))).child(if renaming { crate::screens::siderow::field(light, &self.screens.fields, &id, self.screens.ctx.is_some() || self.screens.ctx_field.is_some()) } else if inbox {
                         let (proj, ago) = (sub.trim().to_string(), trs(&string(t, "ago")));
                         div().flex_1().min_w_0().flex().flex_col().justify_center().gap(px(1.)).relative()
                             .child(div().w_full().overflow_hidden().whitespace_nowrap().text_ellipsis().line_height(crate::scale::tpx(18.)).child(string(t, "title")))
@@ -461,14 +463,14 @@ impl Backplane {
                     // under the pointer: Snooze (a span from its menu; Wake on a snoozed row), Settle in one press (the hub's `settle`: a stop that asks
                     // nothing), the pin (always on a pinned row). On a two-line row they lie over the title's end, so they take no width from it;
                     // on a one-line row only a pinned row's pin is here, in the row, so the title never runs under a pin that is always drawn
-                    .children({ let g = pin_group.clone();
+                    .when(!renaming, |d| d.children({ let g = pin_group.clone();
                         if inbox { let acts = crate::screens::siderow::action_strip(cx, light, t, g.clone()); let raise = c("raise"); Some(acts.absolute().right(px(8.)).top(px(4.)).px(px(2.)).group_hover(g, move |s| s.bg(raise))) }
-                        else { crate::screens::siderow::always_drawn(t).map(|a| crate::screens::siderow::actions_of(cx, light, t, g, &[a]).flex_shrink_0()) } })
+                        else { crate::screens::siderow::always_drawn(t).map(|a| crate::screens::siderow::actions_of(cx, light, t, g, &[a]).flex_shrink_0()) } }))
                     .children(crate::screens::badge::machine_mark(light, &t["mark"], false, &id)) // (another machine's thread: its name, dim; none for this machine's)
                     .children((labelled && !inbox).then(|| pill.clone_el()).flatten()) // under its project: the label before its age
                     .children((!inbox).then(|| { let want = if labelled { String::new() } else { string(t, "want") }; // a red row says what it wants where its age goes (0.14 Side.want, r01); the label says it now
                         if want.is_empty() { div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(if kids > 0 && !under && string(t, "agents").is_empty() { format!("{kids}") } else { trs(&string(t, "ago")) }) }
-                        else { div().text_size(crate::scale::tpx(11.)).text_color(c(if want == "failed" { "dim" } else { "bad" })).child(trs(&want)) } })).into_any_element()
+                        else { div().text_size(crate::scale::tpx(11.)).text_color(c(if want == "failed" { "dim" } else { "bad" })).child(trs(&want)) } }))).into_any_element()
     }
 }
 
@@ -772,6 +774,8 @@ impl Backplane {
             /* i18n-ok: a ctl label */ ctl.push(CtlEntry { id: format!("fold:{pid}"), label: format!("{} {}", if closed { "Unfold" } else { "Fold" }, string(project, "title")), ctl: Ctl::Node("flag".into(), fold_value.clone()) });
             // a quiet project (nothing on a live shelf: the hub's `quiet`, the Older ones too) is drawn faded, its head and its rows
             let quiet = project["quiet"] == true;
+            // its name box takes the row's width: the place, the digit and the + step aside while it is open
+            let renaming = crate::screens::siderow::renaming(&self.data, &qpid, "project");
             rows.push(with_rect(div().id(SharedString::from(format!("proj-{pid}"))), || format!("project:{pid}")).when(quiet, |d| d.opacity(0.55)).flex().items_center().gap_2().pl(px(6.)).pr_3().pt_3().pb_1().text_size(crate::scale::tpx(11.)).text_color(if on_page { c("text") } else { c("dim") }).border_l_2().border_color(if on_page { c("accent") } else { c("bg") }).when(on_page, |d| d.bg(c("raise"))).cursor_pointer().hover(|s| s.text_color(c("text")))
                 .on_click(cx.listener(move |this, _, _, cx| { this.open_project(pid.clone(), cx); }))
                 .on_drag(DragProj { id: pid_new.clone(), label: crate::streamer::project_shown(&string(project, "title")) }, |d, _, _, cx| { let l = d.label.clone(); cx.new(|_| Ghost(l)) })
@@ -780,11 +784,11 @@ impl Backplane {
                 .on_mouse_down(MouseButton::Right, { let pidm = pid_new.clone(); let proj = project.clone(); cx.listener(move |this, e: &MouseDownEvent, _, cx| { let items = crate::screens::ctxmenu::project_items_of(&pidm, &proj); this.ctx_open(e.position, items, cx); }) })
                 .child(with_rect(div().id(SharedString::from(format!("fold-{pid_new}"))), || format!("fold:{pid_new}")).w(px(16.)).flex_shrink_0().flex().items_center().cursor_pointer().hover(|s| s.bg(c("raise"))).child(ic(light, if closed { "chevron-right" } else { "chevron-down" }, 14., "dim"))
                     .on_click(cx.listener(move |this, _, _, cx| { cx.stop_propagation(); let _ = this.tx.try_send(Command::Action("flag".into(), fold_value.clone())); cx.notify(); })))
-                .child(crate::screens::badge::mark(light, project)).child(div().flex_1().min_w_0().flex().items_center().gap_2().relative().child(if crate::screens::siderow::renaming(&self.data, &qpid, "project") { crate::screens::siderow::field(light, &self.screens.fields, &qpid) } else { div().child(crate::streamer::project_shown(&string(project, "title")).to_uppercase()).into_any_element() }).children(crate::screens::badge::place(light, &project["mark"], project["also"].as_str().unwrap_or(""), &format!("proj-{pid_new}")))
-                    /* i18n-ok: ctl labels and ui: ids the drivers press */ .children(crate::screens::hints::digit_of(&self.screens.hold_projects, &pid_new).map(|n| crate::screens::hints::over_end(crate::screens::hints::digit(light, n))))).child(with_rect(div().id(SharedString::from(format!("new-{pid_new}"))), || "ui:New thread".to_string()).cursor_pointer().tooltip(crate::keys::tip("New thread", &if pid_new == new_here { crate::keys::hint(&self.local, "new") } else { String::new() }, light)).on_click({ let new_on = project["newOn"].clone(); cx.listener(move |this, e: &ClickEvent, _, cx| { cx.stop_propagation();
+                .child(crate::screens::badge::mark(light, project)).child(div().flex_1().min_w_0().flex().items_center().gap_2().relative().child(if renaming { crate::screens::siderow::field(light, &self.screens.fields, &qpid, self.screens.ctx.is_some() || self.screens.ctx_field.is_some()) } else { div().child(crate::streamer::project_shown(&string(project, "title")).to_uppercase()).into_any_element() }).children((!renaming).then(|| crate::screens::badge::place(light, &project["mark"], project["also"].as_str().unwrap_or(""), &format!("proj-{pid_new}"))).flatten())
+                    /* i18n-ok: ctl labels and ui: ids the drivers press */ .children((!renaming).then(|| crate::screens::hints::digit_of(&self.screens.hold_projects, &pid_new).map(|n| crate::screens::hints::over_end(crate::screens::hints::digit(light, n)))).flatten())).when(!renaming, |d| d.child(with_rect(div().id(SharedString::from(format!("new-{pid_new}"))), || "ui:New thread".to_string()).cursor_pointer().tooltip(crate::keys::tip("New thread", &if pid_new == new_here { crate::keys::hint(&self.local, "new") } else { String::new() }, light)).on_click({ let new_on = project["newOn"].clone(); cx.listener(move |this, e: &ClickEvent, _, cx| { cx.stop_propagation();
                         // a project also on linked machines: the + asks which machine the thread starts on
                         let items = crate::screens::ctxmenu::new_items(&pid_new2, &new_on); if items.len() > 1 { this.ctx_open(e.position(), items, cx); return }
-                        this.arm_new(); let _ = this.tx.try_send(Command::Action("new-thread".into(), pid_new2.clone())); cx.notify(); }) }).child(ic(light, "plus", 16., "dim"))).into_any_element());
+                        this.arm_new(); let _ = this.tx.try_send(Command::Action("new-thread".into(), pid_new2.clone())); cx.notify(); }) }).child(ic(light, "plus", 16., "dim")))).into_any_element());
             if project["look"].is_object() {
                 for v in crate::screens::badge::choices(&project["look"], "colors").into_iter().chain(crate::screens::badge::choices(&project["look"], "icons")) { ctl.push(CtlEntry { id: format!("look:{}", v.1), label: v.0, ctl: Ctl::Node("look-set".into(), v.1) }); }
                 if let Some((label, value)) = crate::screens::badge::again(&project["look"]) { ctl.push(CtlEntry { id: "look:again".into(), label, ctl: Ctl::Node("look-again".into(), value) }); }
@@ -974,7 +978,18 @@ impl Render for Backplane {
         if self.models_pending { self.models_pending = false; self.picker_toggle(window, cx); }
         if let Some(w) = self.screens.projects.focus.take() { let e = if w == "folder" { self.screens.projects.folder.clone() } else { self.screens.projects.search.clone() }; if let Some(e) = e { window.focus(&e.focus_handle(cx)); focused_backplane = true; } }
         // a rename's title box (a row's Rename, F2) opens with the whole title selected: typing replaces it, as in every file manager
-        if let Some(n) = self.screens.focus_field.take() { if let Some(s) = self.screens.fields.get(&n) { let input = s.input.clone(); window.focus(&input.focus_handle(cx)); if n == crate::screens::tools::focus_target(&self.data) && n == "title" { input.update(cx, |c, cx| c.menu_do("all", window, cx)); } focused_backplane = true; } }
+        if let Some(n) = self.screens.focus_field.take() { if let Some(s) = self.screens.fields.get(&n) { let input = s.input.clone(); window.focus(&input.focus_handle(cx)); if n == crate::screens::tools::focus_target(&self.data) && n == "title" { input.update(cx, |c, cx| c.select_everything(cx)); } focused_backplane = true; } }
+        // a click elsewhere ends a rename (the box had the keys and lost them, no menu open): a changed title is saved, else it is dropped
+        { let slot = if self.data["renaming"].is_object() { self.screens.fields.get("title").map(|s| s.input.clone()) } else { None };
+          match slot {
+              None => self.screens.rename_was = None,
+              Some(input) => { let (has, text) = (input.focus_handle(cx).is_focused(window), input.read(cx).content.to_string());
+                  let menu = self.screens.ctx.is_some() || self.screens.ctx_field.is_some();
+                  match self.screens.rename_was.clone() {
+                      None => if has { self.screens.rename_was = Some(text) },
+                      Some(was) => if !has && !menu { self.screens.rename_was = None; let id = string(&self.data["renaming"], "id");
+                          crate::screens::settings::flush_fields(self); let _ = self.tx.try_send(crate::screens::tools::rename_leave(&id, &was, &text)); },
+                  } } } }
         if self.screens.focus_settings { self.screens.focus_settings = false; window.focus(&self.screens.settings_focus); focused_backplane = true; }
         if self.screens.setup.want_focus { self.screens.setup.want_focus = false; window.focus(&self.screens.setup_focus); focused_backplane = true; }
         if self.screens.palette.focus { self.screens.palette.focus = false; if let Some(i) = self.screens.palette.input.clone() { window.focus(&i.focus_handle(cx)); focused_backplane = true; } }
@@ -1128,7 +1143,7 @@ impl Render for Backplane {
         // infinite context (the hub's bots/recall/progress.rs): the context chip draws the memory's bar and its words instead of the session's context
         let memory = self.data["memory"].clone(); let mem_on = memory.is_object();
         let (tok, ctx) = if mem_on { (crate::i18n::trs(&string(&memory, "line")), crate::i18n::trs(&string(&memory, "short"))) } else { (string(&self.data, "tokChip"), ctx) };
-        let plan_chip_w = if crate::screens::planmode::parse(&thread["planMode"]).is_some() { 92. } else { 0. };
+        let plan_chip_w = if crate::screens::planmode::parse(&thread["planMode"]).is_some() { crate::screens::combo::plan_w() } else { 0. };
         let (combo_avail, tok_words) = crate::screens::combo::split(if bar_w > 0. { (bar_w - if mem_on { crate::screens::combo::MEM_BAR } else { 0. } - plan_chip_w).max(0.) } else { 0. }, &thread["combo"], &tok, &ctx);
         // the thread's header (screens/head.rs): its state and tools beside the name in the top bar when it has the room, else a row of their own
         // a project's page over a thread: the header is the page's (its project's name), not the thread's

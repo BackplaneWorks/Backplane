@@ -78,6 +78,7 @@ fn chip_runs(line: &str, base: &TextRun, chips: &Chips) -> Vec<TextRun> {
 struct Row { start: usize, len: usize, top: Pixels, line: Option<WrappedLine> }
 impl Row {
     fn height(&self, lh: Pixels) -> Pixels { self.line.as_ref().map_or(lh, |l| l.size(lh).height.max(lh)) }
+    fn width(&self) -> Pixels { self.line.as_ref().map_or(px(0.), |l| l.width()) }
     fn pos(&self, off: usize, lh: Pixels) -> Point<Pixels> { self.line.as_ref().and_then(|l| l.position_for_index(off.min(self.len), lh)).unwrap_or_default() }
     fn hit(&self, p: Point<Pixels>, lh: Pixels) -> usize {
         match &self.line { Some(l) => match l.closest_index_for_position(p, lh) { Ok(i) | Err(i) => i.min(self.len) }, None => 0 }
@@ -112,6 +113,8 @@ pub struct Composer {
     bounds: Option<Bounds<Pixels>>,
     line_height: Pixels,
     scroll_y: Pixels,
+    /// A one-row box's sideways scroll (its text never wraps: `scroll_x` keeps the caret in view).
+    scroll_x: Pixels,
     /// The text's full height as last laid out (`scroll_y` runs over 0..total - view).
     total_h: Pixels,
     /// What the view last followed the caret for (text, caret, box size): prepaint follows the caret again only when it changes, so a wheel scroll stays put.
@@ -141,7 +144,7 @@ impl Composer {
     /// A composer with its own key context: "Composer" sends on Enter (main.rs), "AskInput" emits Submit.
     pub fn with_context(cx: &mut Context<Self>, ctx: &'static str) -> Self {
         /* i18n-ok: the hint, drawn through trs by shown_placeholder */ Self { blink: Default::default(), light: false, masked: false, max_lines: MAX_LINES, ctx, focus: cx.focus_handle().tab_stop(tabs_between_fields(ctx)), ed: Editor::default(), content: "".into(), popup_open: false, chips: vec![], placeholder: "Ask anything: @bot, >thread, %project, #room, &model, $skill, /btw".into(),
-            rows: vec![], bounds: None, line_height: px(20.), scroll_y: px(0.), total_h: px(0.), followed: None, selecting: false, elsewhere: false, recalled: None }
+            rows: vec![], bounds: None, line_height: px(20.), scroll_y: px(0.), scroll_x: px(0.), total_h: px(0.), followed: None, selecting: false, elsewhere: false, recalled: None }
     }
     pub fn set(&mut self, text: String, cx: &mut Context<Self>) { self.ed.set(&text); self.sync(cx); }
     pub fn dictate(&mut self, range: std::ops::Range<usize>, with: &str, caret: usize, cx: &mut Context<Self>) { self.ed.dictate(range, with, caret); self.sync(cx); }
@@ -150,9 +153,11 @@ impl Composer {
     fn shown_placeholder(&self) -> SharedString { crate::i18n::trs(&self.placeholder).into() }
     /// Move the caret one character: `dir` < 0 back, else forward.
     pub fn caret(&mut self, dir: i32, cx: &mut Context<Self>) { self.edit(cx, |e| if dir < 0 { e.left(false, false) } else { e.right(false, false) }); }
-    pub fn reset(&mut self) { self.ed.set(""); self.content = "".into(); self.rows.clear(); self.scroll_y = px(0.); self.followed = None; }
+    pub fn reset(&mut self) { self.ed.set(""); self.content = "".into(); self.rows.clear(); self.scroll_y = px(0.); self.scroll_x = px(0.); self.followed = None; }
     pub fn editor(&self) -> &Editor { &self.ed }
-    pub fn select_everything(&mut self, cx: &mut Context<Self>) { self.edit(cx, |e| e.select_all()); }
+    /// All of the text selected with the caret at its start (the anchor at the end): a one-row box opened this way (a rename) shows where
+    /// the text begins, End shows its end, and typing still replaces it all.
+    pub fn select_everything(&mut self, cx: &mut Context<Self>) { self.edit(cx, |e| { let n = e.text().len(); e.set_selection(n..0) }); }
     /// A selection made elsewhere in the window (the timeline's) is the one to copy: this one goes, the caret stays where it was.
     pub fn drop_selection(&mut self, cx: &mut Context<Self>) { self.elsewhere = true; if !self.ed.selection().is_empty() { let h = self.ed.head(); self.ed.set_selection(h..h); cx.notify(); } }
     /// Insert a selected excerpt formatted as a Markdown blockquote at the caret/selection as one undoable edit.
@@ -263,7 +268,7 @@ impl Composer {
     }
     fn index_at(&self, window_pos: Point<Pixels>) -> usize {
         let Some(b) = self.bounds else { return 0 };
-        self.index_at_local(point(window_pos.x - b.left(), window_pos.y - b.top() + self.scroll_y)).unwrap_or(0)
+        self.index_at_local(point(window_pos.x - b.left() + self.scroll_x, window_pos.y - b.top() + self.scroll_y)).unwrap_or(0)
     }
 
     // ---- mouse
@@ -355,7 +360,8 @@ impl EntityInputHandler for Composer {
     fn bounds_for_range(&mut self, r: Range<usize>, bounds: Bounds<Pixels>, _: &mut Window, _: &mut Context<Self>) -> Option<Bounds<Pixels>> {
         let r8 = self.r8(&r);
         let a = self.point_of(r8.start)?; let b = self.point_of(r8.end).unwrap_or(a);
-        Some(Bounds::from_corners(point(bounds.left() + a.x, bounds.top() + a.y - self.scroll_y), point(bounds.left() + b.x.max(a.x + px(1.)), bounds.top() + a.y - self.scroll_y + self.line_height)))
+        let l = bounds.left() - self.scroll_x;
+        Some(Bounds::from_corners(point(l + a.x, bounds.top() + a.y - self.scroll_y), point(l + b.x.max(a.x + px(1.)), bounds.top() + a.y - self.scroll_y + self.line_height)))
     }
     fn character_index_for_point(&mut self, p: Point<Pixels>, _: &mut Window, _: &mut Context<Self>) -> Option<usize> {
         let i = self.index_at(p); Some(self.to16(i))
@@ -363,7 +369,7 @@ impl EntityInputHandler for Composer {
 }
 
 struct Element_ { input: Entity<Composer> }
-struct Prepaint { rows: Vec<Row>, carets: Vec<gpui::PaintQuad>, sel: Vec<gpui::PaintQuad>, empty: bool, scroll: Pixels, total: Pixels, follow_sig: (u64, gpui::Size<Pixels>) }
+struct Prepaint { rows: Vec<Row>, carets: Vec<gpui::PaintQuad>, sel: Vec<gpui::PaintQuad>, empty: bool, scroll: Pixels, scroll_x: Pixels, total: Pixels, follow_sig: (u64, gpui::Size<Pixels>) }
 
 impl IntoElement for Element_ { type Element = Self; fn into_element(self) -> Self { self } }
 
@@ -376,9 +382,21 @@ fn runs_for(len: usize, base: &TextRun, marked: Option<&Range<usize>>) -> Vec<Te
 }
 
 
-/// Wrap width passed to `shape_rows`: a single-line box's placeholder never wraps onto a second line (it clips horizontally).
-pub fn wrap_width_for(max_lines: f32, empty: bool, width: Option<Pixels>) -> Option<Pixels> {
-    if empty && max_lines <= 1.0 { None } else { width }
+/// Wrap width passed to `shape_rows`: a one-row box never wraps, its text or its placeholder (it scrolls sideways: `scroll_x`).
+pub fn wrap_width_for(max_lines: f32, width: Option<Pixels>) -> Option<Pixels> {
+    if max_lines <= 1.0 { None } else { width }
+}
+
+/// A one-row box's sideways scroll: the caret (`caret_x`, in the text's own coordinates) stays inside the box (`box_w`) with a small margin,
+/// the text's end (`text_w`, plus the caret after it) never leaves empty space at the right, and a text that fits is not scrolled at all.
+pub fn scroll_x(was: Pixels, caret_x: Pixels, text_w: Pixels, box_w: Pixels) -> Pixels {
+    let end = text_w + px(2.);
+    if end <= box_w { return px(0.) }
+    let m = px(12.).min(box_w / 4.);
+    let mut s = was;
+    if caret_x - s > box_w - m { s = caret_x - (box_w - m) }
+    if caret_x - s < m { s = caret_x - m }
+    s.min(end - box_w).max(px(0.))
 }
 
 impl gpui::Element for Element_ {
@@ -396,7 +414,7 @@ impl gpui::Element for Element_ {
         let base = TextRun { len: text.len(), font: style.font(), color: style.color, background_color: None, underline: None, strikethrough: None };
         let layout = window.request_measured_layout(Style { size: gpui::Size { width: relative(1.).into(), height: gpui::Length::Auto }, ..Default::default() }, move |known, avail, window, _| {
             let w = known.width.or(match avail.width { gpui::AvailableSpace::Definite(w) => Some(w), _ => None });
-            let rows = shape_rows(window, &text, &base, None, font_size, wrap_width_for(max_lines, empty, w), lh, &Chips::default());
+            let rows = shape_rows(window, &text, &base, None, font_size, wrap_width_for(max_lines, w), lh, &Chips::default());
             let h = rows.last().map_or(lh, |r| r.top + r.height(lh));
             size(w.unwrap_or(px(100.)), h.max(lh).min(lh * max_lines))
         });
@@ -412,7 +430,7 @@ impl gpui::Element for Element_ {
         let base = TextRun { len: text.len(), font: style.font(), color, background_color: None, underline: None, strikethrough: None };
         let marked = if empty { None } else { input.ed.marked.clone() };
         let chips = if empty || input.masked { Chips::default() } else { let a = theme::color(light, "accent"); let mut bg: gpui::Hsla = a.into(); bg.a = 0.18; Chips { words: input.chips.clone(), fg: a.into(), bg } };
-        let rows = shape_rows(window, &text, &base, marked.as_ref(), font_size, wrap_width_for(input.max_lines, empty, Some(bounds.size.width)), lh, &chips);
+        let rows = shape_rows(window, &text, &base, marked.as_ref(), font_size, wrap_width_for(input.max_lines, Some(bounds.size.width)), lh, &chips);
         let total = rows.last().map_or(lh, |r| r.top + r.height(lh));
         // keep the caret in view, but only when the text, the caret or the box changed since the last frame: otherwise a wheel scroll would be pulled back
         let head = input.ed.head();
@@ -422,7 +440,13 @@ impl gpui::Element for Element_ {
         // a box squeezed under one row (a parent with a fixed height) never scrolls: that flipped the text 1-2 px every frame
         let view = bounds.size.height.max(lh);
         let scroll = view_scroll(input.scroll_y, caret_y, lh, view, total);
-        let origin = point(bounds.left(), bounds.top() - scroll);
+        // a one-row box: sideways to the caret (on a change only, as above); a box of more rows wraps and never scrolls sideways
+        let sx = if input.max_lines > 1.0 || empty { px(0.) } else {
+            let text_w = rows.iter().map(Row::width).fold(px(0.), |a, b| a.max(b));
+            let caret_x = if follow { rows.iter().rev().find(|r| r.start <= head).map_or(px(0.), |r| r.pos(head - r.start, lh).x) } else { input.scroll_x + bounds.size.width / 2. };
+            scroll_x(input.scroll_x, caret_x, text_w, bounds.size.width)
+        };
+        let origin = point(bounds.left() - sx, bounds.top() - scroll);
         let (accent, mut sel, mut carets) = (theme::color(light, "accent"), Vec::new(), Vec::new());
         let range = input.ed.selection();
         if empty || range.is_empty() {
@@ -447,13 +471,13 @@ impl gpui::Element for Element_ {
                 }
             }
         }
-        Prepaint { rows, carets, sel, empty, scroll, total, follow_sig }
+        Prepaint { rows, carets, sel, empty, scroll, scroll_x: sx, total, follow_sig }
     }
     fn paint(&mut self, _: Option<&GlobalElementId>, _: Option<&gpui::InspectorElementId>, bounds: Bounds<Pixels>, _: &mut (), pre: &mut Prepaint, window: &mut Window, cx: &mut App) {
         let focus = self.input.read(cx).focus.clone();
         window.handle_input(&focus, ElementInputHandler::new(bounds, self.input.clone()), cx);
         let lh = window.line_height();
-        let origin = point(bounds.left(), bounds.top() - pre.scroll);
+        let origin = point(bounds.left() - pre.scroll_x, bounds.top() - pre.scroll);
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
             for q in pre.sel.drain(..) { window.paint_quad(q); }
             for r in &pre.rows { if let Some(l) = &r.line { let _ = l.paint(point(origin.x, origin.y + r.top), lh, TextAlign::Left, Some(bounds), window, cx); } }
@@ -468,8 +492,8 @@ impl gpui::Element for Element_ {
             cx.spawn(async move |cx| { cx.background_executor().timer(w).await; let _ = input.update(cx, |i, cx| { i.blink.pending = false; cx.notify(); }); }).detach();
         }
         let rows = std::mem::take(&mut pre.rows);
-        let (scroll, empty, total, follow_sig) = (pre.scroll, pre.empty, pre.total, pre.follow_sig);
-        self.input.update(cx, |i, _| { i.rows = if empty { vec![] } else { rows }; i.bounds = Some(bounds); i.line_height = lh; i.scroll_y = scroll; i.total_h = total; i.followed = Some(follow_sig); });
+        let (scroll, sx, empty, total, follow_sig) = (pre.scroll, pre.scroll_x, pre.empty, pre.total, pre.follow_sig);
+        self.input.update(cx, |i, _| { i.rows = if empty { vec![] } else { rows }; i.bounds = Some(bounds); i.line_height = lh; i.scroll_y = scroll; i.scroll_x = sx; i.total_h = total; i.followed = Some(follow_sig); });
         let drag_input = self.input.clone();
         window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
             if phase == gpui::DispatchPhase::Bubble && drag_input.read(cx).selecting {
@@ -739,10 +763,21 @@ mod tests {
         assert!(ed.undo());
         assert_eq!(ed.text(), "draft");
     }
-    #[test] fn single_line_placeholder_does_not_wrap() {
-        assert_eq!(wrap_width_for(1.0, true, Some(px(120.))), None);
-        assert_eq!(wrap_width_for(1.0, false, Some(px(120.))), Some(px(120.)));
-        assert_eq!(wrap_width_for(12.0, true, Some(px(120.))), Some(px(120.)));
-        assert_eq!(wrap_width_for(1.0, true, None), None);
+    #[test] fn a_one_row_box_never_wraps() {
+        assert_eq!(wrap_width_for(1.0, Some(px(120.))), None, "a one-row box's text and placeholder stay on one line");
+        assert_eq!(wrap_width_for(12.0, Some(px(120.))), Some(px(120.)), "a taller box wraps at its width");
+        assert_eq!(wrap_width_for(1.0, None), None);
+    }
+    #[test] fn a_one_row_box_scrolls_sideways_to_the_caret() {
+        let (b, t) = (px(100.), px(400.));
+        assert_eq!(scroll_x(px(0.), px(50.), px(80.), b), px(0.), "a text that fits is never scrolled");
+        assert_eq!(scroll_x(px(37.), px(50.), px(80.), b), px(0.), "not even when it was");
+        assert_eq!(scroll_x(px(0.), px(40.), t, b), px(0.), "a caret inside the box: no move");
+        assert_eq!(scroll_x(px(0.), px(200.), t, b), px(112.), "a caret past the right edge: brought in, a margin before the edge");
+        assert_eq!(scroll_x(px(150.), px(155.), t, b), px(143.), "a caret near the left edge: a margin after it");
+        assert_eq!(scroll_x(px(150.), px(0.), t, b), px(0.), "Home: the start");
+        assert_eq!(scroll_x(px(0.), t, t, b), px(302.), "End: the end at the right edge, the caret after it in view, no empty space");
+        assert_eq!(scroll_x(px(500.), px(390.), t, b), px(302.), "a shorter text never leaves space after its end");
+        let s = scroll_x(px(0.), t, t, b); assert!(t - s >= px(0.) && t - s + px(2.) <= b, "the caret at the end is drawn inside the box");
     }
 }

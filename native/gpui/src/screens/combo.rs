@@ -11,13 +11,19 @@ use std::{cell::Cell, rc::Rc};
 /// The width of one character of the chip's words (12 px mono) and what the chip spends besides its words (padding, border, the mark and its gap).
 const CH: f32 = 7.3;
 const FRAME: f32 = 52.;
-/// What the composer's row spends on its other controls (the context chip, Attach, Dictate, Send and the gaps between).
-pub const OTHERS: f32 = 300.;
+/// What the composer's row spends on its other controls (the context chip, Attach, Dictate, Send and the gaps between), as drawn at 100%:
+/// Attach and Dictate 40 px each, Send 58, four 10 px gaps, and the context chip with "ctx NN%" (TOK_FRAME + 7 characters).
+pub const OTHERS: f32 = 275.;
 /// The context chip's frame (padding, border, the gauge and its gap) and the part of OTHERS that is not the context chip ("ctx NN%" was counted in it).
 const TOK_FRAME: f32 = 46.;
 /// At the text size in force (scale.rs): a character's width grows with it, and so does Send's word (SEND_W of OTHERS at 100%); the
 /// frames and the icon buttons do not.
-const SEND_W: f32 = 40.;
+const SEND_W: f32 = 26.;
+/// The Plan chip and its gap as drawn at 100% (58 px and 10), of which its word is PLAN_WORD; the word grows with the text size.
+const PLAN_W: f32 = 68.;
+const PLAN_WORD: f32 = 22.;
+/// What the Plan chip takes from the row when it is shown.
+pub fn plan_w() -> f32 { PLAN_W + PLAN_WORD * (crate::scale::s() - 1.) }
 fn ch() -> f32 { CH * crate::scale::s() }
 fn fixed() -> f32 { OTHERS - (TOK_FRAME + 7. * CH) + SEND_W * (crate::scale::s() - 1.) }
 /// The row's split between the one chip and the context chip: the context chip says tokens, cost and context (`tok`) while the chip's short form
@@ -240,6 +246,15 @@ mod tests {
         // the usual row: the words, the chip whole
         let (avail, text) = split(532., &combo(), tok, "ctx 44%"); assert_eq!(text, "ctx 44%"); assert!(!mark_only(&combo(), avail));
         assert!(!mark_only(&combo(), 0.), "not measured yet: the words");
+        // the row as drawn at 100%: what is left for the chip is the row less Attach, Dictate, Send, the gaps and the context chip,
+        // so the short form keeps its words in the last ~20 px it needs, and the Plan chip takes only what it draws
+        let short = FRAME + string(&combo(), "short").chars().count() as f32 * CH;
+        let edge = OTHERS + short;
+        assert!(!mark_only(&combo(), split(edge + 1., &combo(), "", "ctx 44%").0), "it fits: the words stay");
+        let (avail, text) = split(edge - 30., &combo(), "", "ctx 44%"); assert_eq!(text, "", "a little short: the context words go first");
+        assert!(!mark_only(&combo(), avail), "and the chip keeps its short form");
+        assert!(mark_only(&combo(), split(edge - 70., &combo(), "", "ctx 44%").0), "shorter still: the mark alone");
+        assert!((plan_w() - 68.).abs() < 0.01, "the Plan chip and its gap as drawn, not 92");
     }
     #[test] fn the_chip_says_as_much_as_fits() {
         let c = combo();
