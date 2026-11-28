@@ -986,6 +986,10 @@ object DataClient {
         try { call("thread.act", JSONObject().put("thread", tid).put("action", "fork")).optJSONObject("thread")?.let { val t = parseThread(it); upsert(t); opened(t.id) } }
         catch (e: Exception) { failure = e.message ?: "" }
     }
+    /** Back to the original (a fork, data/1 `forkOf`): the hub hands the fork's work to the thread it came from, with that thread's next message; `done` then opens it. */
+    fun backToOriginal(tid: String, done: () -> Unit) = scope.launch {
+        try { call("thread.act", JSONObject().put("thread", tid).put("action", "back")); done() } catch (e: Exception) { failure = e.message ?: "" }
+    }
     suspend fun badgeList(): JSONObject = call("badge.list", JSONObject())
     fun projectAct(id: String, action: String, title: String = "", value: String = "") = scope.launch {
         try {

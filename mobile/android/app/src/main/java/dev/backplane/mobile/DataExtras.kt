@@ -83,7 +83,7 @@ fun TextPrompt(title: String, initial: String, ok: String, close: () -> Unit, do
 }
 
 /** The actions of a thread, as the desktop's header and row menu offer them. */
-fun threadActions(t: DThread, rename: () -> Unit, confirmDelete: () -> Unit, search: (() -> Unit)? = null, buy: Pair<String, () -> Unit>? = null, fork: (() -> Unit)? = null): List<Pair<String, () -> Unit>> = buildList {
+fun threadActions(t: DThread, rename: () -> Unit, confirmDelete: () -> Unit, search: (() -> Unit)? = null, buy: Pair<String, () -> Unit>? = null, fork: (() -> Unit)? = null, back: (() -> Unit)? = null): List<Pair<String, () -> Unit>> = buildList {
     buy?.let { add(it) } // Buy it heads the thread's tools, as on the desktop
     search?.let { add((if (DataClient.has("find")) Msg.android_find_inthread else Msg.android_search_inthread) to it) }
     add((if (t.pinned) "Unpin" else "Pin") to { DataClient.threadAct(t.id, if (t.pinned) "unpin" else "pin"); Unit })
@@ -92,6 +92,8 @@ fun threadActions(t: DThread, rename: () -> Unit, confirmDelete: () -> Unit, sea
     if (t.parent.isNotEmpty()) add("Move to top level" to { DataClient.threadAct(t.id, "detach"); Unit })
     // Fork thread, as the desktop's thread tools: a new thread that starts from this one's conversation (feature `fork`)
     fork?.takeIf { DataClient.has("fork") }?.let { add(Msg.tools_forkthread to it) }
+    // a fork: its work goes back to the thread it forked from (with that thread's next message), and that thread opens, as on the desktop
+    back?.takeIf { t.forkOf.isNotEmpty() }?.let { add(Msg.gpui_e_tools_back to it) }
     add("Rename" to rename)
     add("Delete…" to confirmDelete)
 }
@@ -103,7 +105,8 @@ fun ThreadMenus(t: DThread, shown: Boolean, close: () -> Unit, deleted: () -> Un
     var contextOpen by remember(t.id) { mutableStateOf(false) }
     val contextAction: List<Pair<String, () -> Unit>> =
         if (DataClient.has("threadContext")) listOf("Context & Prompt" to { contextOpen = true }) else emptyList()
-    if (shown) ActionSheet(t.title, contextAction + threadActions(t, { renaming = true }, { deleting = true }, search, buy, opened?.let { o -> { DataClient.forkThread(t.id, o); Unit } }), close)
+    if (shown) ActionSheet(t.title, contextAction + threadActions(t, { renaming = true }, { deleting = true }, search, buy, opened?.let { o -> { DataClient.forkThread(t.id, o); Unit } },
+        opened?.let { o -> { DataClient.backToOriginal(t.id) { o(t.forkOf) }; Unit } }), close)
     if (contextOpen) ThreadContextSheet(t.id) { contextOpen = false }
     if (renaming) TextPrompt(Msg.android_thread_rename, t.title, Msg.menu_rename, { renaming = false }) { DataClient.threadAct(t.id, "rename", it) }
     if (deleting) ActionSheet(Msg.android_thread_delete_ask(t.title), listOf("Delete thread" to { DataClient.threadAct(t.id, "delete"); deleted() }, "Keep it" to {}), { deleting = false })

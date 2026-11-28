@@ -1362,6 +1362,11 @@ final class DataClient {
         catch { failure = error.localizedDescription }
         return nil
     }
+    /// Back to the original (a fork, data/1 `forkOf`): the hub hands the fork's work to the thread it came from, with that thread's next message.
+    func backToOriginal(_ id: String) async -> Bool {
+        do { let _: DThreadOpt = try await call("thread.act", ["thread": id, "action": "back"]); flushLists(); return true }
+        catch { failure = error.localizedDescription; return false }
+    }
     func badgeList() async -> DBadgeList? { try? await call("badge.list") }
     func projectAct(_ id: String, _ action: String, title: String = "", value: String = "") async {
         var p: [String: Any] = ["project": id, "action": action]; if !title.isEmpty { p["title"] = title }; if !value.isEmpty { p["value"] = value }

@@ -285,7 +285,8 @@ struct DThread: Codable, Equatable, Identifiable, NestedThread {
     var swarm: String    // the swarm (its room) this thread is a member of, "" for none (feature swarm): left out of its project's list
     var memory: DMemory? // infinite context: how far its memory is written (the hub's bots/recall/progress.rs); nil for a thread without it
     var planMode: DPlanMode? = nil
-    enum CodingKeys: String, CodingKey { case id, project, title, state, updatedAt, pinned, pinOrder, settled, settledAt, archived, provider, model, effort, runtime, chip, preview, waiting, parent, history, status, mark, swarm, memory, planMode }
+    var forkOf = ""      // a fork: the thread it forked from (data/1 `forkOf`); its actions offer Back to the original
+    enum CodingKeys: String, CodingKey { case id, project, title, state, updatedAt, pinned, pinOrder, settled, settledAt, archived, provider, model, effort, runtime, chip, preview, waiting, parent, history, status, mark, swarm, memory, planMode, forkOf }
     init(id: String, project: String = "", title: String = "", state: String = "idle", updatedAt: Int = 0, pinned: Bool = false, pinOrder: Int = 0, settled: Bool = false, settledAt: Int = 0, archived: Bool = false, provider: String = "", model: String = "", effort: String = "", runtime: String = "", chip: String = "", preview: String = "", waiting: Int = 0, parent: String = "", history: Bool = false, status: String = "", mark: DMark? = nil, swarm: String = "", memory: DMemory? = nil, planMode: DPlanMode? = nil) {
         self.id = id; self.project = project; self.title = title; self.state = state; self.updatedAt = updatedAt
         self.pinned = pinned; self.pinOrder = pinOrder; self.settled = settled; self.settledAt = settledAt; self.archived = archived
@@ -301,6 +302,7 @@ struct DThread: Codable, Equatable, Identifiable, NestedThread {
         provider = c.str(.provider); model = c.str(.model); effort = c.str(.effort); runtime = c.str(.runtime); chip = c.str(.chip); preview = c.str(.preview); waiting = c.int(.waiting); parent = c.str(.parent); history = c.bool(.history); status = c.str(.status); mark = try? c.decode(DMark.self, forKey: .mark); swarm = c.str(.swarm)
         memory = try? c.decode(DMemory.self, forKey: .memory)
         planMode = try? c.decode(DPlanMode.self, forKey: .planMode)
+        forkOf = c.str(.forkOf)
     }
 }
 /// A thread's memory progress, every word the hub's: the bar is `done` of `total`, `state` caught | behind | held.
