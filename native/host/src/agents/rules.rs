@@ -129,6 +129,10 @@ pub fn unanswered(kind: &str, tool: &str, detail: &str) -> String {
 /// Exit.why: a SIGKILL (137) is most likely the kernel taking the process for memory.
 pub fn exit_why(code: i32) -> String { if code == 137 { "agent was killed (signal 9, likely out of memory)".into() } else { format!("agent exited with code {code}") } }
 
+/// The look mark for a stop the person pressed (`turn.interrupt`): written after the stop, so `state::visible::looked` holds and the thread
+/// stays on its project, not in Needs you with a red Stopped.
+pub fn stop_seen(thread: &str, now: u64) -> Value { json!({"$":"SettingSet","key":format!("sidebar.looked.{thread}"),"value":now.to_string(),"at":now}) }
+
 /// Err.scrub: the text with its secrets dropped (token=/key=/secret=/password= values, Bearer tokens, key-shaped words).
 pub fn err_scrub(s: &str) -> String {
     const KEYS: [&str; 5] = ["token=", "key=", "secret=", "password=", "Bearer "];
@@ -283,6 +287,7 @@ mod tests {
         assert_eq!(restart_cut("", 3600 * 6 + 240), "Backplane restarted at 06:04 during this turn.");
     }
     #[test] fn unanswered_asks_are_named() { assert_eq!(unanswered("approval", "Bash", "ls -la\nx"), " Its request to use Bash was not answered: \u{201C}ls -la\u{201D}"); assert_eq!(unanswered("plan", "", ""), " Its plan was not answered."); assert_eq!(unanswered("input", "", " "), " Its question was not answered"); assert_eq!(unanswered("x", "", ""), " Its request was not answered."); }
+    #[test] fn a_stop_the_person_pressed_is_looked_at() { let e = stop_seen("t1", 50); assert_eq!((e["key"].as_str(), e["value"].as_str()), (Some("sidebar.looked.t1"), Some("50"))); }
     #[test] fn a_sigkill_is_named() { assert!(exit_why(137).contains("signal 9")); assert_eq!(exit_why(3), "agent exited with code 3"); }
     #[test] fn the_rules_block_is_text_for_the_rules_that_apply() {
         let mut st = std::collections::HashMap::new();
