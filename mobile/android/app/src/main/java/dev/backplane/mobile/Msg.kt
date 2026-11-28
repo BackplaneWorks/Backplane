@@ -1512,10 +1512,11 @@ object Msg {
     "gpui.no.matches",
     "gpui.find.in.this.thread",
     "gpui.find.in.thread",
+    "gpui.find.in.all.threads",
     "gpui.previous.match",
-    "gpui.next.match",
   )
   private fun keys6(): Array<String> = arrayOf(
+    "gpui.next.match",
     "gpui.back.to.the.thread",
     "gpui.no.steps.reported.yet",
     "gpui.unsent",
@@ -1548,8 +1549,18 @@ object Msg {
     "gpui.settings.group.general",
     "gpui.settings.group.agents",
     "gpui.settings.group.workspace",
+    "gpui.settings.group.connect",
+    "gpui.settings.group.system",
     "gpui.settings.web.ui",
     "gpui.settings.shared.files",
+    "gpui.settings.page.threads.git",
+    "gpui.settings.git",
+    "gpui.settings.network",
+    "gpui.settings.mouse.board.each",
+    "gpui.settings.mouse.solid.each",
+    "gpui.settings.mouse.preset.note",
+    "gpui.settings.every.device",
+    "gpui.settings.advanced",
     "gpui.imp.could.not.keep.this.draft",
     "gpui.imp.describe.the.change",
     "gpui.imp.describe.the.behavior.in.detail",
@@ -1755,6 +1766,8 @@ object Msg {
     "gpui.imp.send.to.project",
     "gpui.imp.search.projects",
     "gpui.imp.choose.a.project.before.sending",
+  )
+  private fun keys7(): Array<String> = arrayOf(
     "gpui.imp.choose.a.project.then.retry",
     "gpui.imp.the.thread.runs.on.the",
     "gpui.imp.ctrl.enter.sends.this.request",
@@ -1766,8 +1779,6 @@ object Msg {
     "gpui.acct.sync.token.from.a.linked",
     "gpui.acct.sync.days",
     "gpui.acct.renew.the.sync.token",
-  )
-  private fun keys7(): Array<String> = arrayOf(
     "gpui.acct.make.a.sync.token",
     "gpui.acct.make.the.sync.token",
     "gpui.acct.add.claude.sync",
@@ -1810,6 +1821,10 @@ object Msg {
     "gpui.next.thread",
     "gpui.uberbot.chat",
     "gpui.settle.or.unsettle.the.thread",
+    "gpui.rename.the.open.thread",
+    "gpui.larger.text",
+    "gpui.smaller.text",
+    "gpui.text.size.back.to.normal",
     "gpui.stop.the.running.turn",
     "gpui.layer.focus.the.other.layers",
     "gpui.undo.the.last.stroke.or",
@@ -2003,6 +2018,8 @@ object Msg {
     "gpui.c.solid.too.many",
     "gpui.c.solid.incomplete.part",
     "gpui.c.solid.unexpected.part",
+  )
+  private fun keys8(): Array<String> = arrayOf(
     "gpui.c.solid.part.nomodel",
     "gpui.c.solid.no.count",
     "gpui.c.solid.drawing",
@@ -2018,8 +2035,6 @@ object Msg {
     "viewer.c.view.top",
     "viewer.c.view.bottom",
     "viewer.c.view.front",
-  )
-  private fun keys8(): Array<String> = arrayOf(
     "viewer.c.view.right",
     "viewer.c.view.back",
     "viewer.c.view.left",
@@ -2255,6 +2270,8 @@ object Msg {
     "gpui.agent.said",
     "gpui.action",
     "gpui.split",
+  )
+  private fun keys9(): Array<String> = arrayOf(
     "gpui.palette.open",
     "gpui.viewer",
     "gpui.palette.new.thread.in",
@@ -2270,8 +2287,6 @@ object Msg {
     "gpui.regenerate.title",
     "gpui.search.in.thread",
     "gpui.badge",
-  )
-  private fun keys9(): Array<String> = arrayOf(
     "gpui.ctx.click.again.to",
     "gpui.snooze.tomorrow",
     "gpui.ctx.snooze",
@@ -2507,6 +2522,8 @@ object Msg {
     "gpui.e.tok.cost.some",
     "gpui.e.tok.avg",
     "gpui.e.tok.last",
+  )
+  private fun keys10(): Array<String> = arrayOf(
     "gpui.e.tok.bymodel",
     "gpui.e.tok.model.line",
     "gpui.e.tok.model.line.web",
@@ -2522,8 +2539,6 @@ object Msg {
     "gpui.e.acct.weekly.resets",
     "gpui.e.acct.hour5.resets",
     "gpui.e.acct.opus.resets",
-  )
-  private fun keys10(): Array<String> = arrayOf(
     "gpui.e.acct.sonnet.resets",
     "notify.which.alerts.reach.you.quiet",
     "notify.notifications",
@@ -2533,6 +2548,8 @@ object Msg {
     "notify.a.push.waits.until.the",
     "notify.quiet.from.and.until",
     "notify.hh.mm.hours",
+    "notify.quiet.from.hint",
+    "notify.quiet.until.hint",
     "notify.times.are.hh.mm.hours",
     "notify.quiet.hours.are.hh.mm",
     "notify.urgent.asks.come.through",
@@ -2553,6 +2570,8 @@ object Msg {
     "gpui.e.failover.use.the.default.order",
     "gpui.e.failover.choose.an.installed.provider.and",
     "gpui.e.failover.add.to.the.order",
+    "gpui.e.failover.already.in.the.order",
+    "gpui.e.failover.not.installed.here",
     "ring.ring",
     "ring.pebble.index.ring",
     "ring.test.event",
@@ -2755,6 +2774,8 @@ object Msg {
     "gpui.f.note.mailruns",
     "gpui.f.note.mailruns.text",
     "gpui.f.note.routines",
+  )
+  private fun keys11(): Array<String> = arrayOf(
     "gpui.f.note.routines.text",
     "gpui.f.note.machines",
     "gpui.f.note.machines.text",
@@ -2774,8 +2795,6 @@ object Msg {
     "gpui.f.note.notcopied.text",
     "gpui.f.note.signin",
     "gpui.f.note.signin.text",
-  )
-  private fun keys11(): Array<String> = arrayOf(
     "gpui.f.note.accounts.text",
     "gpui.f.note.vault.text",
     "gpui.f.ov.counts",
@@ -3007,6 +3026,8 @@ object Msg {
     "android.alerts.allow",
     "android.alerts.later",
     "android.viewerbg",
+  )
+  private fun keys12(): Array<String> = arrayOf(
     "android.viewerbg.auto",
     "android.viewerbg.light",
     "android.viewerbg.dark",
@@ -3026,8 +3047,6 @@ object Msg {
     "android.room.gone",
     "android.conn.connecting",
     "android.conn.offline",
-  )
-  private fun keys12(): Array<String> = arrayOf(
     "android.hub",
     "android.hub.add",
     "android.pair.repair",
@@ -3259,6 +3278,8 @@ object Msg {
     "android.diff.none",
     "android.checks.run",
     "android.nothing",
+  )
+  private fun keys13(): Array<String> = arrayOf(
     "android.comments.none",
     "android.resolved",
     "android.reopen",
@@ -3278,8 +3299,6 @@ object Msg {
     "android.hub.voice.noaudio.mic",
     "android.hub.voice.silent.mic",
     "android.hub.voice.skip",
-  )
-  private fun keys13(): Array<String> = arrayOf(
     "android.hub.voice.heard.many",
     "android.hub.voice.dropped",
     "android.hub.voice.err.copy",
@@ -3511,6 +3530,8 @@ object Msg {
     "android.hub.accounts.msg.expired",
     "android.hub.accounts.msg.expired.long",
     "android.hub.accounts.msg.generic",
+  )
+  private fun keys14(): Array<String> = arrayOf(
     "android.hub.accounts.msg.nolimits",
     "android.hub.accounts.msg.nowindows",
     "android.hub.accounts.msg.signin",
@@ -3530,8 +3551,6 @@ object Msg {
     "android.hub.accounts.msg.refused",
     "android.hub.accounts.msg.toolarge",
     "android.hub.accounts.msg.closed",
-  )
-  private fun keys14(): Array<String> = arrayOf(
     "android.hub.accounts.msg.timeout",
     "android.hub.accounts.msg.notusage",
     "android.hub.accounts.usage.unauthorized",
@@ -3763,6 +3782,8 @@ object Msg {
     "android.hub.migrate.clashes",
     "android.hub.migrate.fresh",
     "android.hub.migrate.running",
+  )
+  private fun keys15(): Array<String> = arrayOf(
     "android.hub.migrate.botfolder",
     "android.hub.migrate.notcopied",
     "android.hub.migrate.signin",
@@ -3782,8 +3803,6 @@ object Msg {
     "android.find.you",
     "android.find.agent",
     "android.sub.thread",
-  )
-  private fun keys15(): Array<String> = arrayOf(
     "android.sub.back",
     "android.sub.gone",
     "android.sub.more",
@@ -3895,6 +3914,7 @@ object Msg {
     "mobile.diff.renamed",
     "mobile.diff.binary",
     "mobile.settings.advanced",
+    "android.attach.file",
     "android.connecting.word",
     "ios.sections.running",
     "ios.alerts.ask",
@@ -4014,6 +4034,8 @@ object Msg {
     "ios.review.resolved",
     "ios.review.reopen",
     "ios.review.resolve",
+  )
+  private fun keys16(): Array<String> = arrayOf(
     "ios.settled.count",
     "ios.history.count",
     "ios.pad.colour",
@@ -4034,8 +4056,6 @@ object Msg {
     "ios.hub.waiting",
     "ios.hub.is",
     "ios.hub.down",
-  )
-  private fun keys16(): Array<String> = arrayOf(
     "ios.hub.up.safe.degraded",
     "ios.hub.up.degraded",
     "ios.hub.up.safe",
@@ -4266,6 +4286,8 @@ object Msg {
     "gpui.f2.v.connected.as",
     "gpui.f2.i.connected",
     "gpui.f2.i.connected.as",
+  )
+  private fun keys17(): Array<String> = arrayOf(
     "gpui.f2.v.notconnected",
     "gpui.f2.i.notconnected",
     "gpui.f2.v.runcmd",
@@ -4286,8 +4308,6 @@ object Msg {
     "gpui.f2.alwayson",
     "gpui.f2.alwayson.body",
     "gpui.f2.aon.here",
-  )
-  private fun keys17(): Array<String> = arrayOf(
     "gpui.f2.aon.here.note",
     "gpui.f2.aon.boat",
     "gpui.f2.aon.boat.note",
@@ -4518,6 +4538,8 @@ object Msg {
     "gpui.mgmt.filter",
     "gpui.mgmt.bom.noparts",
     "gpui.mgmt.bom.dnp",
+  )
+  private fun keys18(): Array<String> = arrayOf(
     "gpui.mgmt.fab.tab",
     "gpui.mgmt.fab.drc.current",
     "gpui.mgmt.fab.drc.stale",
@@ -4538,8 +4560,6 @@ object Msg {
     "gpui.mgmt.fab.extra",
     "gpui.mgmt.fab.readcol",
     "gpui.mgmt.fab.derived",
-  )
-  private fun keys18(): Array<String> = arrayOf(
     "gpui.mgmt.fab.suggestion",
     "gpui.mgmt.fab.read",
     "gpui.mgmt.fab.reviewing",
@@ -4770,6 +4790,8 @@ object Msg {
     "mouse.nothingissettopan42",
     "mouse.nothingissettozoom43",
     "mouse.nothingissettorotate44",
+  )
+  private fun keys19(): Array<String> = arrayOf(
     "gpui.review.mark",
     "gpui.review.mark.tip",
     "gpui.review.why",
@@ -4782,6 +4804,7 @@ object Msg {
     "gpui.rail.no.schematic",
     "gpui.rail.split.needs.both",
     "gpui.rail.no.mech",
+    "gpui.rail.no.thread",
     "gpui.panestate.next.board",
     "gpui.panestate.next.schematic",
     "gpui.panestate.next.solid",
@@ -4790,8 +4813,6 @@ object Msg {
     "gpui.panestate.gerbers.noboard",
     "gpui.panestate.gerbers.noboard.next",
     "gpui.panestate.empty.mech",
-  )
-  private fun keys19(): Array<String> = arrayOf(
     "gpui.panestate.next.mech",
     "gpui.panestate.loading.split",
     "gpui.panestate.retrying",
@@ -5021,6 +5042,8 @@ object Msg {
     "web.ring.found",
     "web.ring.not.heard",
     "web.ring.app.words",
+  )
+  private fun keys20(): Array<String> = arrayOf(
     "web.ring.heard.by",
     "web.ring.heard.by.sure",
     "web.ring.state.sent",
@@ -5042,8 +5065,7 @@ object Msg {
     "gpui.c.solidcraft.own.window",
     "gpui.c.solidcraft.not.installed",
     "gpui.c.solidcraft.install.desc",
-  )
-  private fun keys20(): Array<String> = arrayOf(
+    "gpui.c.solidcraft.install.desc.nosize",
     "gpui.c.solidcraft.install.btn",
     "gpui.c.solidcraft.installing",
     "gpui.c.solidcraft.downloading",
@@ -5105,6 +5127,8 @@ object Msg {
     "settings.cad.mech.tab.note",
     "settings.cad.mech.solidcraft",
     "settings.cad.mech.backplane",
+    "common.cut",
+    "menu.copy.message",
   )
   internal val keys: Array<String> by lazy { arrayOf(*keys0(), *keys1(), *keys2(), *keys3(), *keys4(), *keys5(), *keys6(), *keys7(), *keys8(), *keys9(), *keys10(), *keys11(), *keys12(), *keys13(), *keys14(), *keys15(), *keys16(), *keys17(), *keys18(), *keys19(), *keys20()) }
   private fun en0(): Array<String> = arrayOf(
@@ -5425,7 +5449,7 @@ object Msg {
     "Open Google's sign-in",
     "Continue",
     "Sign-in failed",
-    "No answer came back (Settings, Writing: the model it asks).",
+    "No answer came back (Settings, Agents: the model it asks).",
     "every minute",
     "every {n} minutes",
     "every hour",
@@ -5549,7 +5573,7 @@ object Msg {
     "No setting matches.",
     "Projects groups threads by project; active lists what is going on, what needs you first.",
     "Active",
-    "Network and updates",
+    "About and updates",
     "Update channel",
     "Stable takes releases; nightly also takes the daily builds.",
     "Nightly",
@@ -6616,10 +6640,11 @@ object Msg {
     "No matches",
     "Find in this thread",
     "Find in thread",
+    "Find in all threads",
     "Previous match",
-    "Next match",
   )
   private fun en6(): Array<String> = arrayOf(
+    "Next match",
     "Back to the thread",
     "No steps reported yet.",
     "Unsent",
@@ -6650,10 +6675,20 @@ object Msg {
     "Home machine",
     "Make this machine the home",
     "General",
-    "Agents and tools",
+    "Agents",
     "Workspace",
+    "Connect",
+    "System",
     "Web UI",
     "Shared files",
+    "Threads and git",
+    "Git",
+    "Network",
+    "Board and schematic: each input",
+    "3D and STEP: each input",
+    "A preset sets every input (each one is under Advanced). Each input does one thing: choosing an action for an input replaces what it did.",
+    "Every device",
+    "Advanced",
     "Could not keep this draft on this device. Retry.",
     "Describe the change…",
     "Describe the behavior in detail: what you did and what you saw.",
@@ -6818,7 +6853,7 @@ object Msg {
     " · resets {when}",
     "Webhook name",
     "{label} (e.g. {e})",
-    "No tasks yet. Teach this bot a browser task and it shows here.",
+    "No tasks yet. Tasks this bot learns in its Browser tab are listed here.",
     "{from}–{to} of {total}",
     "Infinite context",
     "On",
@@ -6841,13 +6876,13 @@ object Msg {
     "No mail.",
     "{n, plural, one {# older conversation not shown} other {# older conversations not shown}}",
     "This space is a web page; it is shown in the phone apps.",
-    "No space yet. The bot writes it with space_set.",
+    "No space yet. A space is a page this bot keeps for you; ask it in Chat to make one.",
     "Created",
     "The hub refused it.",
     "Webhook made. Keep its secret: it is shown only now.",
     "Path",
     "off",
-    "No hooks.",
+    "No webhooks.",
     "{n, plural, one {# call} other {# calls}}",
     "No token",
     "No messages yet.",
@@ -6859,6 +6894,8 @@ object Msg {
     "Send to project",
     "Search projects…",
     "Choose a project before sending.",
+  )
+  private fun en7(): Array<String> = arrayOf(
     "Choose a project, then retry Send.",
     "The thread runs on the other machine. Images and recordings stay on this computer. Ctrl+Enter sends this request.",
     "Ctrl+Enter sends this request.",
@@ -6870,8 +6907,6 @@ object Msg {
     "sync token from a linked machine",
     "{n, plural, one {# day left} other {# days left}}",
     "Renew the sync token",
-  )
-  private fun en7(): Array<String> = arrayOf(
     "Make a sync token",
     "Make the sync token",
     "Add Claude (sync)",
@@ -6893,7 +6928,7 @@ object Msg {
     "New line in the message",
     "Send (also)",
     "Put the keyboard in the message box",
-    "Put the keyboard in the message box, from anywhere (a field, a viewer, a dialog)",
+    "Put the keyboard in the message box from anywhere",
     "Agent, model and effort",
     "Account of this thread, with what each has left",
     "Pick account 1…9 in the account menu",
@@ -6914,6 +6949,10 @@ object Msg {
     "Next thread",
     "Uberbot chat",
     "Settle or unsettle the thread",
+    "Rename the open thread",
+    "Larger text",
+    "Smaller text",
+    "Text size back to normal (100%)",
     "Stop the running turn",
     "Layer focus: the other layers as they are, dimmed, hidden",
     "Undo the last stroke or change",
@@ -7107,6 +7146,8 @@ object Msg {
     "Too many part triangles",
     "Incomplete part",
     "Unexpected part bytes",
+  )
+  private fun en8(): Array<String> = arrayOf(
     "part without its model",
     "missing triangle count",
     "Drawing the view…",
@@ -7122,8 +7163,6 @@ object Msg {
     "Top",
     "Bottom",
     "Front",
-  )
-  private fun en8(): Array<String> = arrayOf(
     "Right",
     "Back",
     "Left",
@@ -7261,7 +7300,7 @@ object Msg {
     "Connected",
     "Disconnected",
     "Hub is opening its log…",
-    "Hub disconnected. Draft kept; reconnecting. Check the experimental hub log.",
+    "Hub disconnected. Draft kept; reconnecting. If it stays like this, restart Backplane.",
     "The hub refused it: {why}",
     "This thread, bot or room is not on this hub: it was deleted, or it is on another machine.",
     "View request refused: {code}",
@@ -7359,6 +7398,8 @@ object Msg {
     "agent said",
     "action",
     "Split",
+  )
+  private fun en9(): Array<String> = arrayOf(
     "Open {kind}",
     "viewer",
     "New thread in {project}",
@@ -7374,8 +7415,6 @@ object Msg {
     "Regenerate title",
     "Search in thread",
     "Badge",
-  )
-  private fun en9(): Array<String> = arrayOf(
     "Click again to {what}",
     "Snooze tomorrow",
     "Snooze {when}",
@@ -7611,6 +7650,8 @@ object Msg {
     "{cost} for {n} of them",
     "Average speed",
     "Last turn",
+  )
+  private fun en10(): Array<String> = arrayOf(
     "This session by model",
     "{in} in · {out} out · {cread} cache read · {cwrite} cache write",
     "{in} in · {out} out · {cread} cache read · {cwrite} cache write · {n} web searches",
@@ -7626,8 +7667,6 @@ object Msg {
     "Weekly  {left}% left · resets {when}",
     "5-hour  {left}% left · resets {when}",
     "Opus weekly  {left}% left · resets {when}",
-  )
-  private fun en10(): Array<String> = arrayOf(
     "Sonnet weekly  {left}% left · resets {when}",
     "Which alerts reach you, quiet hours and phones are under Notifications.",
     "Notifications ›",
@@ -7637,6 +7676,8 @@ object Msg {
     "A push waits until the end of quiet hours, in your time zone, and goes then as one.",
     "Quiet from and until",
     "HH:MM, 24 hours.",
+    "From, 22:00",
+    "Until, 07:00",
     "Times are HH:MM, 24 hours, and not the same.",
     "Quiet hours are HH:MM to HH:MM, 24 hours, and not the same time twice.",
     "Urgent asks come through",
@@ -7657,6 +7698,8 @@ object Msg {
     "Use the default order",
     "Choose an installed provider, and a model or its default, then add it to the end.",
     "Add to the order",
+    "Already in the order.",
+    "Not installed on this machine.",
     "Ring",
     "Pebble Index ring",
     "Test event",
@@ -7803,7 +7846,7 @@ object Msg {
     "Add ~/.local/bin to your PATH to run backplane from a terminal.",
     "Backplane is not on your PATH. Open it from its folder or the Start menu.",
     "Updates",
-    "Settings, Network and updates picks the stable or the nightly channel.",
+    "Settings, About and updates picks the stable or the nightly channel.",
     "Where your data is kept",
     "Backplane keeps your threads, settings, bots and keys in one folder on this computer. A background program, the hub, runs your agents from that folder. It keeps running when you close the window, so agents finish their work. Each computer usually has one.",
     "Data folder",
@@ -7859,6 +7902,8 @@ object Msg {
     "Mail runs",
     "{n, plural, one {# mail run stays} other {# mail runs stay}} in 0.14. They were the mailroom's own working threads, and its mail stays with them.",
     "Routines",
+  )
+  private fun en11(): Array<String> = arrayOf(
     "{n, plural, one {# routine arrives} other {# routines arrive}} switched off, so none runs twice while 0.14 still runs. Turn each on in its bot's Routines tab.",
     "Other machines",
     "Links to your other machines stay in 0.14. Link them again in Settings, Devices.",
@@ -7878,8 +7923,6 @@ object Msg {
     "{path} could not be copied: {why}.",
     "Sign in again",
     "Sign in again to {names}. Their history came across.",
-  )
-  private fun en11(): Array<String> = arrayOf(
     "The account profiles were copied but not added yet. Import again once the hub has finished starting.",
     "The 0.14 keys did not come: {why}. Add them again in Settings, API keys.",
     "{p, number} of {pn, number} projects · {t, number} of {tn, number} threads · {e, number} of {en, number} events",
@@ -7985,12 +8028,12 @@ object Msg {
     "Restarts and updates",
     "On. Turns that a restart cuts short go on by themselves.",
     "Off. A restart stops running turns, and you start them again.",
-    "The hub keeps running when you close the window, so agents finish their work. This hub is updated by the installer or package it came from. To update, run the install command again. Settings, Network and updates shows the version and the update channel. Settings, Threads sets what happens to running turns when the hub restarts.",
-    "The hub keeps running when you close the window, so agents finish their work. This hub checks for a new build every hour on the {channel} channel and installs it once no turn is running. If the new build fails its health check, the hub goes back to the one it had. Paired phones show the same line in their Settings. Settings, Network and updates shows the version and the update channel. Settings, Threads sets what happens to running turns when the hub restarts.",
+    "The hub keeps running when you close the window, so agents finish their work. This hub is updated by the installer or package it came from. To update, run the install command again. Settings, About and updates shows the version and the update channel. Settings, Threads and git sets what happens to running turns when the hub restarts.",
+    "The hub keeps running when you close the window, so agents finish their work. This hub checks for a new build every hour on the {channel} channel and installs it once no turn is running. If the new build fails its health check, the hub goes back to the one it had. Paired phones show the same line in their Settings. Settings, About and updates shows the version and the update channel. Settings, Threads and git sets what happens to running turns when the hub restarts.",
     "Continue after a restart",
     "Open the page",
-    "Closes setup and opens Settings, Network and updates. Finish setup in the sidebar brings you back.",
-    "Network and updates",
+    "Closes setup and opens Settings, About and updates. Finish setup in the sidebar brings you back.",
+    "About and updates",
     "Your first project",
     "A project is a folder, usually with a KiCad project in it. Give a folder that exists to add it, or a new path to make it. In a git repository, each thread works in its own worktree, so threads do not touch each other's files.",
     "Add another project.",
@@ -8028,9 +8071,9 @@ object Msg {
     "A room is a shared chat for you and your bots. Pick who joins, then post. Each bot reads the room and answers there, so two bots can review each other's work while you watch. Rooms work across linked machines too.",
     "Make a room",
     "New room",
-    "A routine runs a bot on a schedule. Open a bot, then its Routines tab, and write what it should do and when. Backplane reads times like tomorrow 9am, monday 09:00, in 20m or 2026-10-14 09:00. Routines follow your time zone, which Settings, Time zone shows. Reminders use the same list.",
+    "A routine runs a bot on a schedule. Open a bot, then its Routines tab, and write what it should do and when. Backplane reads times like tomorrow 9am, monday 09:00, in 20m or 2026-10-14 09:00. Routines follow your time zone, which Settings, Notifications shows. Reminders use the same list.",
     "Palette and shortcuts",
-    "{m}+K opens the palette. Type part of a thread's name or a command, then press Enter. Settings, This device lists every shortcut and lets you change them.",
+    "{m}+K opens the palette. Type part of a thread's name or a command, then press Enter. Settings, Keyboard lists every shortcut and lets you change them.",
     "Agent, model and effort",
     "Previous and next thread",
     "{m}+Shift+[ and {m}+Shift+]",
@@ -8111,6 +8154,8 @@ object Msg {
     "Allow alerts",
     "Not now",
     "3D background",
+  )
+  private fun en12(): Array<String> = arrayOf(
     "Auto",
     "Light",
     "Dark",
@@ -8130,8 +8175,6 @@ object Msg {
     "That room is not on this hub.",
     "connecting to {hub}…",
     "offline · showing what this phone has saved",
-  )
-  private fun en12(): Array<String> = arrayOf(
     "Hub",
     "Add a hub",
     "Re-pair this device",
@@ -8363,6 +8406,8 @@ object Msg {
     "No changes.",
     "Run checks",
     "Nothing to show.",
+  )
+  private fun en13(): Array<String> = arrayOf(
     "No comments yet. Add one below; the agent reads the open ones with its next message.",
     "resolved",
     "reopen",
@@ -8382,8 +8427,6 @@ object Msg {
     "Nothing received from the microphone yet. Is it plugged in? Pick another in Settings, Voice.",
     "Only silence from the microphone so far. Is it muted, or the wrong one?",
     "Skip",
-  )
-  private fun en13(): Array<String> = arrayOf(
     "Heard “{word}” (1 of {count})",
     "{heard} dropped ↶",
     "A hub on a copied log cannot install or remove voice models.",
@@ -8615,6 +8658,8 @@ object Msg {
     "Sign-in expired. Sign in again.",
     "Failed to authenticate: this account's sign-in expired. Sign in again in Settings, Accounts.",
     "Account operation failed. Check its current status before retrying.",
+  )
+  private fun en14(): Array<String> = arrayOf(
     "Claude does not report limits for this account (it may not be a subscription plan).",
     "Claude reported no limit windows for this account.",
     "Sign-in could not be verified. Retry or check the provider CLI installation.",
@@ -8634,8 +8679,6 @@ object Msg {
     "Claude refused the request: {reason}",
     "The Claude CLI's reply was too large.",
     "The Claude CLI closed before reporting usage.",
-  )
-  private fun en14(): Array<String> = arrayOf(
     "The Claude CLI did not answer within 30 seconds.",
     "Claude's usage service answered with something else than usage.",
     "Claude refused the request: OAuth token rejected (status code 401).",
@@ -8867,6 +8910,8 @@ object Msg {
     "{n, plural, one {1 item stays in 0.14 because this hub already uses its name for something else.} other {# items stay in 0.14 because this hub already uses their names for something else.}}",
     "Turn state, queues, wakes, locks and usage meters start fresh here.",
     "0.14 is still running. Import again later to bring what it adds after now.",
+  )
+  private fun en15(): Array<String> = arrayOf(
     "The folder of {name} holds {gb} GB and stays at {path}. Its threads and memory came across.",
     "{path} could not be copied: {why}.",
     "Sign in again to {names}. Their history came across.",
@@ -8886,8 +8931,6 @@ object Msg {
     "you said",
     "agent said",
     "the thread",
-  )
-  private fun en15(): Array<String> = arrayOf(
     "Back to {title}",
     "This subagent's steps are no longer kept.",
     "{n, plural, one {# earlier step not shown} other {# earlier steps not shown}}",
@@ -8999,6 +9042,7 @@ object Msg {
     "renamed",
     "binary",
     "Advanced",
+    "Choose a file",
     "connecting",
     "{n, number} running",
     "Bub can alert you when a thread needs you.",
@@ -9118,6 +9162,8 @@ object Msg {
     "resolved",
     "reopen",
     "resolve",
+  )
+  private fun en16(): Array<String> = arrayOf(
     "Settled ({n})",
     "Chats with no project ({n})",
     "Colour {n}",
@@ -9138,8 +9184,6 @@ object Msg {
     "Waiting for the hub…",
     "Hub is {status}…",
     "Hub is down.",
-  )
-  private fun en16(): Array<String> = arrayOf(
     "Hub is up in safe mode, degraded.",
     "Hub is up, degraded.",
     "Hub is up in safe mode.",
@@ -9352,7 +9396,7 @@ object Msg {
     "Buy it · estimate incomplete",
     "Search projects…",
     "NOTIFICATIONS",
-    "Settings, This device changes them. Esc closes this.",
+    "Settings, Keyboard changes them. Esc closes this.",
     "Keyboard shortcuts: this list. ? outside a text box, F1 anywhere",
     "Backplane runs coding agents on your boards, schematics and mechanical parts. Six short steps set it up, and each one can be skipped. Finish later closes setup until the next launch.",
     "{home}. Your threads, settings, bots and keys are kept here, and the hub runs your agents from it.",
@@ -9370,6 +9414,8 @@ object Msg {
     "Version {v}. Connected as {who}.",
     "Installed. Connected.",
     "Installed. Connected as {who}.",
+  )
+  private fun en17(): Array<String> = arrayOf(
     "Version {v}. Not connected.",
     "Installed. Not connected.",
     "Version {v}. If it is not signed in yet, run {cmd} in a terminal.",
@@ -9390,8 +9436,6 @@ object Msg {
     "Where your uberbot lives",
     "Always-on keeps your uberbot, reminders, bots and phone alerts running while this computer sleeps. Hardware and code still run here.",
     "Stay on this computer",
-  )
-  private fun en17(): Array<String> = arrayOf(
     "Your uberbot runs here, while this computer is on. You can move it later in Settings, Machines.",
     "An always-on Boat",
     "A Boat is a small cloud server on your own Boat account. Backplane sets it up and looks after it, and it keeps your uberbot, bots, reminders and phone alerts running while this computer is off or asleep. Boat bills you, not Backplane: plans start at \$20 a month, and a small Boat running all month uses about \$13 of that. You can move your uberbot back here and delete the Boat in Settings, Machines.",
@@ -9409,7 +9453,7 @@ object Msg {
     "Optional. Get the app, then show the code here and scan it. The phone opens your uberbot.",
     "Scan this with the Backplane app, or type the short code and this address. It works once, for ten minutes. Treat it as a password.",
     "Show the code",
-    "Press ? any time for keys.",
+    "Press F1 any time for keys.",
     "Open the uberbot",
     "Setup runs on a computer, in Settings, Setup there. This phone is paired with it.",
     "Six short steps: agents, design tools, your uberbot's name, where it lives and a first project.",
@@ -9622,6 +9666,8 @@ object Msg {
     "Filter",
     "No parts.",
     "DNP",
+  )
+  private fun en18(): Array<String> = arrayOf(
     "Fab",
     "The fab's limits are in the DRC rules",
     "The DRC rules have older fab limits",
@@ -9642,8 +9688,6 @@ object Msg {
     "Costs more",
     "Read",
     "* worked out from the fab's page (a mil in mm, a ring from a diameter). Dimmed: the rigid board's value, where this board's page says nothing else. A date opens the page it was read from.",
-  )
-  private fun en18(): Array<String> = arrayOf(
     "{what}: board setup {project} mm, the fab {fab} mm",
     "rev {rev}, read {day}",
     "Reviewing the design…",
@@ -9874,6 +9918,8 @@ object Msg {
     "Nothing is set to pan",
     "Nothing is set to zoom",
     "Nothing is set to rotate",
+  )
+  private fun en19(): Array<String> = arrayOf(
     "Read-only",
     "Review mode: the design files are read-only for this thread",
     "Read-only: this request looked like a review, so Backplane refuses changes to the design files.",
@@ -9886,6 +9932,7 @@ object Msg {
     "No schematic in this project",
     "Split needs a board and a schematic",
     "No mechanical parts in this project",
+    "Open a thread to use this",
     "Ask an agent to lay one out.",
     "Ask an agent to draw one.",
     "Ask an agent to lay out a board.",
@@ -9894,8 +9941,6 @@ object Msg {
     "No board to compare these Gerbers against.",
     "Add a board to this project to compare them.",
     "No mechanical parts in this project yet",
-  )
-  private fun en19(): Array<String> = arrayOf(
     "Ask an agent to model one, or add a STEP file to mech/.",
     "Loading the views…",
     "Trying again…",
@@ -10125,6 +10170,8 @@ object Msg {
     "{found} of {total} have “{q}”.",
     "Not heard",
     "The Pebble app's words",
+  )
+  private fun en20(): Array<String> = arrayOf(
     "Heard by {model}",
     "Heard by {model}, {conf}% sure",
     "given to Pebble",
@@ -10145,9 +10192,8 @@ object Msg {
     "Could not create embedded SolidCraft container window.",
     "SolidCraft is open in its own window.",
     "SolidCraft is not installed.",
-    "Install SolidCraft v0.50.0 (~228 MB) to view and edit STEP, SolidCraft, STL, and mesh files.",
-  )
-  private fun en20(): Array<String> = arrayOf(
+    "Install SolidCraft {version} (about {mb} MB) to view and edit STEP, SolidCraft, STL, and mesh files.",
+    "Install SolidCraft to view and edit STEP, SolidCraft, STL, and mesh files.",
     "Install SolidCraft",
     "Installing SolidCraft…",
     "Downloading…",
@@ -10209,6 +10255,8 @@ object Msg {
     "Where a mechanical part opens on the desktop: in SolidCraft, to view and edit it, or in Backplane's own 3D viewer, view only and quick. The Mech tab's header switches between them for a while.",
     "SolidCraft",
     "Backplane's viewer",
+    "Cut",
+    "Copy message",
   )
   internal val en: Array<String> by lazy { arrayOf(*en0(), *en1(), *en2(), *en3(), *en4(), *en5(), *en6(), *en7(), *en8(), *en9(), *en10(), *en11(), *en12(), *en13(), *en14(), *en15(), *en16(), *en17(), *en18(), *en19(), *en20()) }
   private fun ja0(): Array<String> = arrayOf(
@@ -10529,7 +10577,7 @@ object Msg {
     "Googleのサインインを開く",
     "続行",
     "サインインに失敗しました",
-    "回答がありませんでした（質問先のモデルは設定の「文章生成」で選べます）。",
+    "回答がありませんでした（質問先のモデルは設定の「エージェント」で選べます）。",
     "毎分",
     "{n}分ごと",
     "毎時",
@@ -10653,7 +10701,7 @@ object Msg {
     "一致する設定はありません。",
     "プロジェクト別、または対応待ちを優先した実行状況別に表示します。",
     "進行中",
-    "ネットワークと更新",
+    "概要と更新",
     "更新チャンネル",
     "安定版はリリースのみ、ナイトリーは日次ビルドも受け取ります。",
     "ナイトリー",
@@ -11720,10 +11768,11 @@ object Msg {
     "一致なし",
     "このスレッド内を検索",
     "スレッド内を検索",
+    "すべてのスレッド内を検索",
     "前の一致",
-    "次の一致",
   )
   private fun ja6(): Array<String> = arrayOf(
+    "次の一致",
     "スレッドに戻る",
     "報告されたステップはまだありません。",
     "未送信",
@@ -11754,10 +11803,20 @@ object Msg {
     "ホームマシン",
     "このマシンをホームにする",
     "一般",
-    "エージェントとツール",
+    "エージェント",
     "ワークスペース",
+    "接続",
+    "システム",
     "Web UI",
     "共有ファイル",
+    "スレッドと git",
+    "Git",
+    "ネットワーク",
+    "基板と回路図: 各操作",
+    "3DとSTEP: 各操作",
+    "プリセットはすべての操作を設定します（各操作は「詳細」にあります）。各操作は1つの動作だけを持ちます。動作を選ぶと、それまでの動作が置き換わります。",
+    "すべての端末",
+    "詳細",
     "この下書きをこの端末に保存できませんでした。再試行してください。",
     "変更内容を書いてください…",
     "操作した内容と、そのとき見えたことを詳しく書いてください。",
@@ -11922,7 +11981,7 @@ object Msg {
     " · {when}にリセット",
     "Webhookの名前",
     "{label}（例：{e}）",
-    "タスクはまだありません。このボットにブラウザのタスクを教えると、ここに表示されます。",
+    "タスクはまだありません。このボットがブラウザタブで覚えたタスクがここに表示されます。",
     "{total}件中 {from}–{to}",
     "無限コンテキスト",
     "オン",
@@ -11945,7 +12004,7 @@ object Msg {
     "メールはありません。",
     "{n, plural, other {表示していない古い会話が#件あります}}",
     "このスペースはWebページです。スマートフォンのアプリで表示されます。",
-    "スペースはまだありません。ボットがspace_setで作ります。",
+    "スペースはまだありません。スペースはボットがあなたのために保つページです。チャットで作るよう頼んでください。",
     "作成日",
     "ハブに拒否されました。",
     "Webhookを作成しました。シークレットは今だけ表示されるので、控えておいてください。",
@@ -11963,6 +12022,8 @@ object Msg {
     "プロジェクトへ送信",
     "プロジェクトを検索…",
     "送信する前にプロジェクトを選んでください。",
+  )
+  private fun ja7(): Array<String> = arrayOf(
     "プロジェクトを選んでから、もう一度送信してください。",
     "スレッドは別のマシンで動きます。画像と録画はこのコンピューターに残ります。Ctrl+Enterでこのリクエストを送信します。",
     "Ctrl+Enterでこのリクエストを送信します。",
@@ -11974,8 +12035,6 @@ object Msg {
     "リンク先のマシンからの同期トークン",
     "{n, plural, other {残り#日}}",
     "同期トークンを更新",
-  )
-  private fun ja7(): Array<String> = arrayOf(
     "同期トークンを作成",
     "同期トークンを作成する",
     "Claude（同期）を追加",
@@ -11997,7 +12056,7 @@ object Msg {
     "メッセージ内で改行",
     "送信（別のキー）",
     "メッセージ欄に入力を移す",
-    "どこからでもメッセージ欄に入力を移す（入力欄・ビューア・ダイアログから）",
+    "どこからでもメッセージ欄に入力を移す",
     "エージェント・モデル・推論の強さ",
     "このスレッドのアカウント（各アカウントの残量つき）",
     "アカウントメニューでアカウント1…9を選択",
@@ -12018,6 +12077,10 @@ object Msg {
     "次のスレッド",
     "Uberbot チャット",
     "スレッドを完了／完了を取り消す",
+    "開いているスレッドの名前を変更",
+    "文字を大きく",
+    "文字を小さく",
+    "文字サイズを標準（100%）に戻す",
     "実行中のターンを停止",
     "レイヤーフォーカス：他のレイヤーをそのまま・薄く・非表示",
     "直前の線や変更を取り消す",
@@ -12211,6 +12274,8 @@ object Msg {
     "部品の三角形が多すぎます",
     "部品が不完全です",
     "部品のデータが想定外です",
+  )
+  private fun ja8(): Array<String> = arrayOf(
     "モデルのない部品",
     "三角形の数がありません",
     "ビューを描画中…",
@@ -12226,8 +12291,6 @@ object Msg {
     "上",
     "下",
     "前",
-  )
-  private fun ja8(): Array<String> = arrayOf(
     "右",
     "後",
     "左",
@@ -12365,7 +12428,7 @@ object Msg {
     "接続済み",
     "切断",
     "ハブがログを開いています…",
-    "ハブとの接続が切れました。下書きは残してあり、再接続しています。実験用ハブのログを確認してください。",
+    "ハブとの接続が切れました。下書きは残してあり、再接続しています。このまま続く場合は Backplane を再起動してください。",
     "ハブが拒否しました: {why}",
     "このスレッド、ボット、ルームはこのハブにありません。削除されたか、別のマシンにあります。",
     "表示の要求が拒否されました: {code}",
@@ -12463,6 +12526,8 @@ object Msg {
     "エージェントの発言",
     "操作",
     "分割",
+  )
+  private fun ja9(): Array<String> = arrayOf(
     "{kind}を開く",
     "ビューア",
     "{project}に新しいスレッド",
@@ -12478,8 +12543,6 @@ object Msg {
     "タイトルを再生成",
     "スレッド内を検索",
     "バッジ",
-  )
-  private fun ja9(): Array<String> = arrayOf(
     "もう一度クリックして{what}",
     "明日までスヌーズ",
     "{when}スヌーズ",
@@ -12715,6 +12778,8 @@ object Msg {
     "{cost}（うち{n}件分）",
     "平均速度",
     "前回のターン",
+  )
+  private fun ja10(): Array<String> = arrayOf(
     "このセッションのモデル別",
     "入力 {in} · 出力 {out} · キャッシュ読み取り {cread} · キャッシュ書き込み {cwrite}",
     "入力 {in} · 出力 {out} · キャッシュ読み取り {cread} · キャッシュ書き込み {cwrite} · Web検索 {n}回",
@@ -12730,8 +12795,6 @@ object Msg {
     "週間  残り{left}% · {when}にリセット",
     "5時間  残り{left}% · {when}にリセット",
     "週間（Opus）  残り{left}% · {when}にリセット",
-  )
-  private fun ja10(): Array<String> = arrayOf(
     "週間（Sonnet）  残り{left}% · {when}にリセット",
     "どの通知を受け取るか、静かな時間帯、スマートフォンは「通知」にあります。",
     "通知 ›",
@@ -12741,6 +12804,8 @@ object Msg {
     "プッシュは静かな時間帯が終わる(あなたのタイムゾーン)まで待ち、終わるとまとめて送られます。",
     "静かな時間帯の開始と終了",
     "HH:MM(24時間表記)。",
+    "開始、22:00",
+    "終了、07:00",
     "時刻はHH:MM(24時間表記)で、同じ時刻にはできません。",
     "静かな時間帯はHH:MMからHH:MM(24時間表記)で、同じ時刻にはできません。",
     "緊急の確認は通す",
@@ -12761,6 +12826,8 @@ object Msg {
     "既定の順序を使う",
     "インストール済みのプロバイダーと、モデルまたはその既定を選び、末尾に追加します。",
     "順序に追加",
+    "すでに順序に入っています。",
+    "このマシンにはインストールされていません。",
     "リング",
     "Pebble Index リング",
     "テストイベント",
@@ -12907,7 +12974,7 @@ object Msg {
     "ターミナルからbackplaneを実行するには、~/.local/binをPATHに追加してください。",
     "BackplaneはPATHにありません。フォルダかスタートメニューから開いてください。",
     "更新",
-    "設定 → ネットワークと更新で、安定版かナイトリーのチャンネルを選べます。",
+    "設定 → 概要と更新で、安定版かナイトリーのチャンネルを選べます。",
     "データの保存場所",
     "Backplaneはスレッド、設定、ボット、キーをこのコンピュータの1つのフォルダに保存します。バックグラウンドのプログラムであるハブが、そのフォルダからエージェントを動かします。ウィンドウを閉じても動き続けるので、エージェントは作業を終えられます。通常、1台のコンピュータに1つです。",
     "データフォルダ",
@@ -12963,6 +13030,8 @@ object Msg {
     "メール実行",
     "{n, plural, other {#件のメール実行}}は0.14に残ります。メールルーム専用の作業スレッドで、そのメールも一緒に残ります。",
     "ルーティン",
+  )
+  private fun ja11(): Array<String> = arrayOf(
     "0.14が動いている間に二重に実行されないよう、{n, plural, other {#件のルーティン}}はオフの状態で移行されます。各ボットのルーティンタブでオンにしてください。",
     "他のマシン",
     "他のマシンとのリンクは0.14に残ります。設定 → デバイスでもう一度リンクしてください。",
@@ -12982,8 +13051,6 @@ object Msg {
     "{path}をコピーできませんでした: {why}。",
     "再サインイン",
     "{names}に再度サインインしてください。履歴は移行されました。",
-  )
-  private fun ja11(): Array<String> = arrayOf(
     "アカウントのプロファイルはコピーされましたが、まだ追加されていません。ハブの起動が終わったらもう一度インポートしてください。",
     "0.14のキーは移行されませんでした: {why}。設定 → APIキーでもう一度追加してください。",
     "プロジェクト {p, number}/{pn, number} · スレッド {t, number}/{tn, number} · イベント {e, number}/{en, number}",
@@ -13089,12 +13156,12 @@ object Msg {
     "再起動と更新",
     "オン。再起動で中断したターンは自動で続きます。",
     "オフ。再起動すると実行中のターンは止まり、自分で再開します。",
-    "ウィンドウを閉じてもハブは動き続けるので、エージェントは作業を終えられます。このハブは、入手元のインストーラやパッケージで更新されます。更新するにはインストールコマンドをもう一度実行してください。設定 → ネットワークと更新でバージョンと更新チャンネルを確認できます。設定 → スレッドで、ハブの再起動時に実行中のターンをどうするかを決められます。",
-    "ウィンドウを閉じてもハブは動き続けるので、エージェントは作業を終えられます。このハブは{channel}チャンネルの新しいビルドを1時間ごとに確認し、実行中のターンがなくなったらインストールします。新しいビルドがヘルスチェックに失敗すると、元のビルドに戻ります。ペアリング済みのスマートフォンの設定にも同じ内容が表示されます。設定 → ネットワークと更新でバージョンと更新チャンネルを確認できます。設定 → スレッドで、ハブの再起動時に実行中のターンをどうするかを決められます。",
+    "ウィンドウを閉じてもハブは動き続けるので、エージェントは作業を終えられます。このハブは、入手元のインストーラやパッケージで更新されます。更新するにはインストールコマンドをもう一度実行してください。設定 → 概要と更新でバージョンと更新チャンネルを確認できます。設定 → スレッドと git で、ハブの再起動時に実行中のターンをどうするかを決められます。",
+    "ウィンドウを閉じてもハブは動き続けるので、エージェントは作業を終えられます。このハブは{channel}チャンネルの新しいビルドを1時間ごとに確認し、実行中のターンがなくなったらインストールします。新しいビルドがヘルスチェックに失敗すると、元のビルドに戻ります。ペアリング済みのスマートフォンの設定にも同じ内容が表示されます。設定 → 概要と更新でバージョンと更新チャンネルを確認できます。設定 → スレッドと git で、ハブの再起動時に実行中のターンをどうするかを決められます。",
     "再起動後に続ける",
     "ページを開く",
-    "セットアップを閉じて設定 → ネットワークと更新を開きます。サイドバーの「セットアップを続ける」で戻れます。",
-    "ネットワークと更新",
+    "セットアップを閉じて設定 → 概要と更新を開きます。サイドバーの「セットアップを続ける」で戻れます。",
+    "概要と更新",
     "最初のプロジェクト",
     "プロジェクトはフォルダで、通常はKiCadプロジェクトが入っています。既存のフォルダを指定すると追加され、新しいパスを指定すると作成されます。Gitリポジトリでは各スレッドが専用のワークツリーで作業するので、スレッド同士が互いのファイルに触れることはありません。",
     "別のプロジェクトを追加します。",
@@ -13132,9 +13199,9 @@ object Msg {
     "ルームは、あなたとボットの共有チャットです。参加者を選んで投稿します。各ボットがルームを読んでそこで答えるので、2体のボットが互いの作業をレビューする様子を見守れます。ルームはリンクしたマシンをまたいでも使えます。",
     "ルームを作る",
     "新しいルーム",
-    "ルーティンはボットを予定どおりに動かします。ボットを開いてルーティンタブで、何をいつするかを書きます。Backplaneは tomorrow 9am、monday 09:00、in 20m、2026-10-14 09:00 のような時刻を読み取ります。ルーティンはあなたのタイムゾーンに従い、設定 → タイムゾーンで確認できます。リマインダーも同じ一覧を使います。",
+    "ルーティンはボットを予定どおりに動かします。ボットを開いてルーティンタブで、何をいつするかを書きます。Backplaneは tomorrow 9am、monday 09:00、in 20m、2026-10-14 09:00 のような時刻を読み取ります。ルーティンはあなたのタイムゾーンに従い、設定 → 通知で確認できます。リマインダーも同じ一覧を使います。",
     "パレットとショートカット",
-    "{m}+Kでパレットを開きます。スレッド名やコマンドの一部を入力してEnterを押します。設定 → このデバイスですべてのショートカットを確認・変更できます。",
+    "{m}+Kでパレットを開きます。スレッド名やコマンドの一部を入力してEnterを押します。設定 → キーボードですべてのショートカットを確認・変更できます。",
     "エージェント・モデル・思考量",
     "前と次のスレッド",
     "{m}+Shift+[ と {m}+Shift+]",
@@ -13215,6 +13282,8 @@ object Msg {
     "通知を許可",
     "今はしない",
     "3D の背景",
+  )
+  private fun ja12(): Array<String> = arrayOf(
     "自動",
     "ライト",
     "ダーク",
@@ -13234,8 +13303,6 @@ object Msg {
     "そのルームはこのハブにありません。",
     "{hub} に接続中…",
     "オフライン · この端末に保存した内容を表示中",
-  )
-  private fun ja12(): Array<String> = arrayOf(
     "ハブ",
     "ハブを追加",
     "この端末を再ペアリング",
@@ -13467,6 +13534,8 @@ object Msg {
     "変更はありません。",
     "チェックを実行",
     "表示するものはありません。",
+  )
+  private fun ja13(): Array<String> = arrayOf(
     "コメントはまだありません。下から追加してください。エージェントは次のメッセージで未解決のコメントを読みます。",
     "解決済み",
     "再開",
@@ -13486,8 +13555,6 @@ object Msg {
     "マイクからまだ何も届いていません。接続されていますか？ 設定の音声で別のマイクを選べます。",
     "マイクからは無音しか届いていません。ミュートになっているか、別のマイクではありませんか？",
     "スキップ",
-  )
-  private fun ja13(): Array<String> = arrayOf(
     "「{word}」と聞き取りました（{count}件中1件目）",
     "{heard}を削除 ↶",
     "コピーしたログで動くハブでは、音声モデルのインストールや削除はできません。",
@@ -13719,6 +13786,8 @@ object Msg {
     "サインインの期限が切れました。再度サインインしてください。",
     "認証に失敗しました: このアカウントのサインインが期限切れです。設定のアカウントで再度サインインしてください。",
     "アカウントの操作に失敗しました。再試行する前に現在の状態を確認してください。",
+  )
+  private fun ja14(): Array<String> = arrayOf(
     "Claudeはこのアカウントの上限を報告しません（サブスクリプションプランではない可能性があります）。",
     "Claudeはこのアカウントの上限期間を報告しませんでした。",
     "サインインを確認できませんでした。再試行するか、プロバイダーCLIのインストールを確認してください。",
@@ -13738,8 +13807,6 @@ object Msg {
     "Claudeがリクエストを拒否しました: {reason}",
     "Claude CLIの応答が大きすぎます。",
     "Claude CLIが使用状況を報告する前に終了しました。",
-  )
-  private fun ja14(): Array<String> = arrayOf(
     "Claude CLIが30秒以内に応答しませんでした。",
     "Claudeの使用状況サービスが使用状況以外の応答を返しました。",
     "Claudeがリクエストを拒否しました: OAuthトークンが拒否されました（ステータスコード401）。",
@@ -13971,6 +14038,8 @@ object Msg {
     "{n, plural, other {#件}}の項目は、このハブで同じ名前がすでに使われているため0.14に残ります。",
     "ターンの状態、キュー、ウェイク、ロック、使用量メーターはここで新しく始まります。",
     "0.14はまだ実行中です。今後追加される分は、後でもう一度インポートしてください。",
+  )
+  private fun ja15(): Array<String> = arrayOf(
     "{name}のフォルダーは{gb} GBあり、{path}に残ります。スレッドとメモリーは移行しました。",
     "{path}をコピーできませんでした: {why}。",
     "{names}に再度サインインしてください。履歴は移行しました。",
@@ -13990,8 +14059,6 @@ object Msg {
     "あなたの発言",
     "エージェントの発言",
     "スレッド",
-  )
-  private fun ja15(): Array<String> = arrayOf(
     "{title} に戻る",
     "このサブエージェントの手順はもう保存されていません。",
     "{n, plural, other {それ以前の # 件の手順は表示されていません}}",
@@ -14103,6 +14170,7 @@ object Msg {
     "名前変更",
     "バイナリ",
     "詳細設定",
+    "ファイルを選ぶ",
     "接続中",
     "{n, number}件実行中",
     "スレッドがあなたを必要とするとき、Bub が通知できます。",
@@ -14222,6 +14290,8 @@ object Msg {
     "解決済み",
     "再開",
     "解決",
+  )
+  private fun ja16(): Array<String> = arrayOf(
     "完了（{n}）",
     "プロジェクトなしのチャット（{n}）",
     "色{n}",
@@ -14242,8 +14312,6 @@ object Msg {
     "ハブを待っています…",
     "ハブは{status}…",
     "ハブは停止しています。",
-  )
-  private fun ja16(): Array<String> = arrayOf(
     "ハブはセーフモードで動作中です（機能低下）。",
     "ハブは動作中です（機能低下）。",
     "ハブはセーフモードで動作中です。",
@@ -14456,7 +14524,7 @@ object Msg {
     "購入 · 見積もりが不完全",
     "プロジェクトを検索…",
     "通知",
-    "設定 → このデバイスで変更できます。Escで閉じます。",
+    "設定 → キーボードで変更できます。Escで閉じます。",
     "キーボードショートカット：この一覧。テキスト欄の外では ?、どこでも F1",
     "Backplaneは基板・回路図・機構部品の上でコーディングエージェントを動かします。6つの短いステップで準備し、どれも飛ばせます。「後で続ける」で次回起動までセットアップを閉じます。",
     "{home}。スレッド・設定・ボット・キーはここに保存され、ハブはここからエージェントを動かします。",
@@ -14474,6 +14542,8 @@ object Msg {
     "バージョン {v}。{who} として接続済み。",
     "インストール済み。接続済み。",
     "インストール済み。{who} として接続済み。",
+  )
+  private fun ja17(): Array<String> = arrayOf(
     "バージョン {v}。未接続。",
     "インストール済み。未接続。",
     "バージョン {v}。まだサインインしていなければ、ターミナルで {cmd} を実行してください。",
@@ -14494,8 +14564,6 @@ object Msg {
     "メインボットの置き場所",
     "常時稼働にすると、このコンピュータがスリープ中もメインボット・リマインダー・ボット・スマホへの通知が動き続けます。ハードウェアとコードは引き続きここで動きます。",
     "このコンピュータのまま",
-  )
-  private fun ja17(): Array<String> = arrayOf(
     "メインボットはこのコンピュータが動いている間ここで動きます。後で 設定 → マシン から移せます。",
     "常時稼働のBoat",
     "Boatは、ご自身のBoatアカウント上の小さなクラウドサーバーです。BackplaneがBoatを用意して管理し、このコンピュータの電源が切れていてもスリープ中でも、メインボット・ボット・リマインダー・スマホへの通知を動かし続けます。請求はBackplaneではなくBoatから届きます。プランは月20ドルからで、小さなBoatを1か月動かし続けるとそのうち約13ドル分を使います。後で 設定 → マシン から、メインボットをここに戻してBoatを削除できます。",
@@ -14513,7 +14581,7 @@ object Msg {
     "任意です。アプリを入れてから、ここでコードを表示して読み取ってください。スマホはメインボットを開きます。",
     "Backplaneアプリでこれを読み取るか、短いコードとこのアドレスを入力してください。1回だけ、10分間有効です。パスワードと同じように扱ってください。",
     "コードを表示",
-    "? でいつでもキー一覧を表示できます。",
+    "F1 でいつでもキー一覧を表示できます。",
     "メインボットを開く",
     "セットアップはコンピュータの 設定 → セットアップ で行います。このスマホはそのコンピュータとペアリングされています。",
     "6つの短いステップ：エージェント、設計ツール、メインボットの名前、置き場所、最初のプロジェクト。",
@@ -14726,6 +14794,8 @@ object Msg {
     "絞り込み",
     "部品はありません。",
     "実装しない",
+  )
+  private fun ja18(): Array<String> = arrayOf(
     "製造",
     "製造元の限界値はDRCルールに入っています",
     "DRCルールの製造元の限界値が古くなっています",
@@ -14746,8 +14816,6 @@ object Msg {
     "追加料金",
     "読んだ日",
     "* 製造元のページから計算した値です（milをmmに、径からランドを）。薄い色の項目はリジッド基板の値です（この基板のページに記載がないもの）。日付を押すと読んだページが開きます。",
-  )
-  private fun ja18(): Array<String> = arrayOf(
     "{what}：ボード設定 {project} mm、製造元 {fab} mm",
     "第{rev}版・{day}に読んだもの",
     "設計をレビューしています…",
@@ -14978,6 +15046,8 @@ object Msg {
     "パンに割り当てた操作がありません",
     "ズームに割り当てた操作がありません",
     "回転に割り当てた操作がありません",
+  )
+  private fun ja19(): Array<String> = arrayOf(
     "読み取り専用",
     "レビューモード：このスレッドでは設計ファイルは読み取り専用です",
     "読み取り専用：この依頼はレビューと判断されたため、Backplaneは設計ファイルへの変更を拒否します。",
@@ -14990,6 +15060,7 @@ object Msg {
     "このプロジェクトには回路図がありません",
     "分割表示には基板と回路図が必要です",
     "このプロジェクトには機械部品がありません",
+    "スレッドを開くと使えます",
     "エージェントに基板のレイアウトを依頼してください。",
     "エージェントに回路図の作成を依頼してください。",
     "エージェントに基板のレイアウトを依頼してください。",
@@ -14998,8 +15069,6 @@ object Msg {
     "これらのガーバーと比較する基板がありません。",
     "比較するには、このプロジェクトに基板を追加してください。",
     "このプロジェクトに機構パーツはまだありません",
-  )
-  private fun ja19(): Array<String> = arrayOf(
     "エージェントにモデル作成を依頼するか、mech/ に STEP ファイルを追加してください。",
     "ビューを読み込み中…",
     "再試行中…",
@@ -15229,6 +15298,8 @@ object Msg {
     "{total} 件中 {found} 件に「{q}」があります。",
     "未認識",
     "Pebble アプリの文字起こし",
+  )
+  private fun ja20(): Array<String> = arrayOf(
     "{model} が認識",
     "{model} が認識、確度 {conf}%",
     "Pebble に渡しました",
@@ -15249,9 +15320,8 @@ object Msg {
     "埋め込み用 SolidCraft コンテナウィンドウを作成できませんでした。",
     "SolidCraft は別ウィンドウで開いています。",
     "SolidCraft がインストールされていません。",
-    "SolidCraft v0.50.0（約 228 MB）をインストールして STEP、SolidCraft、STL、メッシュファイルを表示・編集します。",
-  )
-  private fun ja20(): Array<String> = arrayOf(
+    "SolidCraft {version}（約 {mb} MB）をインストールして STEP、SolidCraft、STL、メッシュファイルを表示・編集します。",
+    "SolidCraft をインストールして STEP、SolidCraft、STL、メッシュファイルを表示・編集します。",
     "SolidCraft をインストール",
     "SolidCraft をインストールしています…",
     "ダウンロード中…",
@@ -15313,6 +15383,8 @@ object Msg {
     "デスクトップで機械部品を開く場所：SolidCraft（表示と編集）または Backplane の 3D ビューアー（表示のみ、高速）。Mech タブのヘッダーでしばらくの間切り替えられます。",
     "SolidCraft",
     "Backplane のビューアー",
+    "切り取り",
+    "メッセージをコピー",
   )
   internal val ja: Array<String> by lazy { arrayOf(*ja0(), *ja1(), *ja2(), *ja3(), *ja4(), *ja5(), *ja6(), *ja7(), *ja8(), *ja9(), *ja10(), *ja11(), *ja12(), *ja13(), *ja14(), *ja15(), *ja16(), *ja17(), *ja18(), *ja19(), *ja20()) }
   private fun es0(): Array<String> = arrayOf(
@@ -15633,7 +15705,7 @@ object Msg {
     "Abrir inicio de sesión de Google",
     "Continuar",
     "Falló el inicio de sesión",
-    "No llegó respuesta (Ajustes, Escritura: el modelo al que pregunta).",
+    "No llegó respuesta (Ajustes, Agentes: el modelo al que pregunta).",
     "cada minuto",
     "cada {n} minutos",
     "cada hora",
@@ -15757,7 +15829,7 @@ object Msg {
     "Ningún ajuste coincide.",
     "Proyectos agrupa hilos por proyecto; activos lista lo que está en curso, lo que te necesita primero.",
     "Activos",
-    "Red y actualizaciones",
+    "Acerca de y actualizaciones",
     "Canal de actualización",
     "Estable toma versiones publicadas; nocturno también toma compilaciones diarias.",
     "Nocturno",
@@ -16824,10 +16896,11 @@ object Msg {
     "Sin coincidencias",
     "Buscar en este hilo",
     "Buscar en el hilo",
+    "Buscar en todos los hilos",
     "Coincidencia anterior",
-    "Siguiente coincidencia",
   )
   private fun es6(): Array<String> = arrayOf(
+    "Siguiente coincidencia",
     "Volver al hilo",
     "Sin pasos reportados aún.",
     "Sin enviar",
@@ -16858,10 +16931,20 @@ object Msg {
     "Máquina de inicio",
     "Hacer de esta máquina el inicio",
     "General",
-    "Agentes y herramientas",
+    "Agentes",
     "Espacio de trabajo",
+    "Conexión",
+    "Sistema",
     "Interfaz web",
     "Archivos compartidos",
+    "Hilos y git",
+    "Git",
+    "Red",
+    "Placa y esquema: cada entrada",
+    "3D y STEP: cada entrada",
+    "Un preajuste fija todas las entradas (cada una está en Avanzado). Cada entrada hace una sola cosa: elegir una acción para una entrada sustituye la anterior.",
+    "Todos los dispositivos",
+    "Avanzado",
     "No se pudo guardar este borrador en este dispositivo. Reintenta.",
     "Describe el cambio…",
     "Describe el comportamiento en detalle: qué hiciste y qué viste.",
@@ -17026,7 +17109,7 @@ object Msg {
     " · se reinicia {when}",
     "Nombre del webhook",
     "{label} (p. ej. {e})",
-    "Sin tareas aún. Enseña a este bot una tarea del navegador y aparecerá aquí.",
+    "Sin tareas aún. Las tareas que este bot aprende en su pestaña Navegador aparecen aquí.",
     "{from}–{to} de {total}",
     "Contexto infinito",
     "Activado",
@@ -17049,7 +17132,7 @@ object Msg {
     "Sin correo.",
     "{n, plural, one {# conversación anterior no mostrada} other {# conversaciones anteriores no mostradas}}",
     "Este space es una página web; se muestra en las apps del teléfono.",
-    "Sin space aún. El bot lo escribe con space_set.",
+    "Sin espacio aún. Un espacio es una página que este bot mantiene para ti; pídeselo en el Chat.",
     "Creado",
     "El hub lo rechazó.",
     "Webhook creado. Guarda su secreto: solo se muestra ahora.",
@@ -17067,6 +17150,8 @@ object Msg {
     "Enviar a proyecto",
     "Buscar proyectos…",
     "Elige un proyecto antes de enviar.",
+  )
+  private fun es7(): Array<String> = arrayOf(
     "Elige un proyecto y reintenta Enviar.",
     "El hilo se ejecuta en la otra máquina. Las imágenes y grabaciones permanecen en este ordenador. Ctrl+Enter envía esta petición.",
     "Ctrl+Enter envía esta petición.",
@@ -17078,8 +17163,6 @@ object Msg {
     "token de sincronización de una máquina vinculada",
     "{n, plural, one {# día restante} other {# días restantes}}",
     "Renovar el token de sincronización",
-  )
-  private fun es7(): Array<String> = arrayOf(
     "Crear un token de sincronización",
     "Crear el token de sincronización",
     "Añadir Claude (sincronización)",
@@ -17101,7 +17184,7 @@ object Msg {
     "Nueva línea en el mensaje",
     "Enviar (también)",
     "Poner el foco en el cuadro de mensaje",
-    "Poner el foco en el cuadro de mensaje, desde cualquier lugar (un campo, un visor, un diálogo)",
+    "Poner el foco en el cuadro de mensaje desde cualquier lugar",
     "Agente, modelo y esfuerzo",
     "Cuenta de este hilo, con lo que le queda a cada una",
     "Elegir cuenta 1…9 en el menú de cuentas",
@@ -17122,6 +17205,10 @@ object Msg {
     "Hilo siguiente",
     "Chat de Uberbot",
     "Cerrar o reabrir el hilo",
+    "Renombrar el hilo abierto",
+    "Texto más grande",
+    "Texto más pequeño",
+    "Tamaño del texto normal (100%)",
     "Detener el turno en curso",
     "Enfoque de capa: las demás capas tal cual, atenuadas, ocultas",
     "Deshacer el último trazo o cambio",
@@ -17315,6 +17402,8 @@ object Msg {
     "Demasiados triángulos de pieza",
     "Pieza incompleta",
     "Bytes de pieza inesperados",
+  )
+  private fun es8(): Array<String> = arrayOf(
     "pieza sin su modelo",
     "falta el conteo de triángulos",
     "Dibujando la vista…",
@@ -17330,8 +17419,6 @@ object Msg {
     "Superior",
     "Inferior",
     "Frontal",
-  )
-  private fun es8(): Array<String> = arrayOf(
     "Derecha",
     "Trasera",
     "Izquierda",
@@ -17469,7 +17556,7 @@ object Msg {
     "Conectado",
     "Desconectado",
     "El hub está abriendo su registro…",
-    "Hub desconectado. Borrador conservado; reconectando. Revisa el registro experimental del hub.",
+    "Hub desconectado. Borrador guardado; reconectando. Si sigue así, reinicia Backplane.",
     "El hub lo rechazó: {why}",
     "Este hilo, bot o sala no está en este hub: fue eliminado o está en otra máquina.",
     "Petición de vista rechazada: {code}",
@@ -17567,6 +17654,8 @@ object Msg {
     "el agente dijo",
     "acción",
     "Dividir",
+  )
+  private fun es9(): Array<String> = arrayOf(
     "Abrir {kind}",
     "visor",
     "Nuevo hilo en {project}",
@@ -17582,8 +17671,6 @@ object Msg {
     "Regenerar título",
     "Buscar en el hilo",
     "Insignia",
-  )
-  private fun es9(): Array<String> = arrayOf(
     "Haz clic de nuevo para {what}",
     "Posponer mañana",
     "Posponer {when}",
@@ -17819,6 +17906,8 @@ object Msg {
     "{cost} para {n} de ellos",
     "Velocidad media",
     "Último turno",
+  )
+  private fun es10(): Array<String> = arrayOf(
     "Esta sesión por modelo",
     "{in} ent · {out} sal · {cread} lectura caché · {cwrite} escritura caché",
     "{in} ent · {out} sal · {cread} lectura caché · {cwrite} escritura caché · {n} búsquedas web",
@@ -17834,8 +17923,6 @@ object Msg {
     "Semanal  {left}% restante · se reinicia {when}",
     "5 horas  {left}% restante · se reinicia {when}",
     "Semanal Opus  {left}% restante · se reinicia {when}",
-  )
-  private fun es10(): Array<String> = arrayOf(
     "Semanal Sonnet  {left}% restante · se reinicia {when}",
     "Qué alertas te llegan, horas de silencio y teléfonos están en Notificaciones.",
     "Notificaciones ›",
@@ -17845,6 +17932,8 @@ object Msg {
     "Una notificación push espera hasta el fin de las horas de silencio, en tu zona horaria, y se envía entonces junta.",
     "Silencio desde y hasta",
     "HH:MM, 24 horas.",
+    "Desde, 22:00",
+    "Hasta, 07:00",
     "Las horas son HH:MM, 24 horas, y no la misma.",
     "Las horas de silencio son HH:MM a HH:MM, 24 horas, y no la misma hora dos veces.",
     "Las peticiones urgentes pasan",
@@ -17865,6 +17954,8 @@ object Msg {
     "Usar el orden por defecto",
     "Elige un proveedor instalado, y un modelo o su predeterminado, y añádelo al final.",
     "Añadir al orden",
+    "Ya está en el orden.",
+    "No está instalado en esta máquina.",
     "Anillo",
     "Anillo Pebble Index",
     "Evento de prueba",
@@ -18011,7 +18102,7 @@ object Msg {
     "Añade ~/.local/bin a tu PATH para ejecutar backplane desde una terminal.",
     "Backplane no está en tu PATH. Ábrelo desde su carpeta o el menú Inicio.",
     "Actualizaciones",
-    "Ajustes, Red y actualizaciones elige el canal estable o el nocturno.",
+    "Ajustes, Acerca de y actualizaciones elige el canal estable o el nocturno.",
     "Dónde se guardan tus datos",
     "Backplane guarda tus hilos, ajustes, bots y claves en una carpeta de este ordenador. Un programa en segundo plano, el hub, ejecuta tus agentes desde esa carpeta. Sigue ejecutándose al cerrar la ventana, para que los agentes terminen su trabajo. Cada ordenador suele tener uno.",
     "Carpeta de datos",
@@ -18067,6 +18158,8 @@ object Msg {
     "Envíos de correo",
     "{n, plural, one {# envío de correo se queda} other {# envíos de correo se quedan}} en 0.14. Eran los hilos propios de trabajo del mailroom y su correo se queda con ellos.",
     "Rutinas",
+  )
+  private fun es11(): Array<String> = arrayOf(
     "{n, plural, one {# rutina llega} other {# rutinas llegan}} apagada, para que ninguna se ejecute dos veces mientras 0.14 siga corriendo. Activa cada una en la pestaña Rutinas de su bot.",
     "Otras máquinas",
     "Los enlaces a tus otras máquinas se quedan en 0.14. Vincúlalas de nuevo en Ajustes, Dispositivos.",
@@ -18086,8 +18179,6 @@ object Msg {
     "No se pudo copiar {path}: {why}.",
     "Inicia sesión de nuevo",
     "Inicia sesión de nuevo en {names}. Su historial sí se trajo.",
-  )
-  private fun es11(): Array<String> = arrayOf(
     "Los perfiles de cuenta se copiaron pero aún no se añadieron. Importa de nuevo cuando el hub termine de iniciar.",
     "Las claves de 0.14 no llegaron: {why}. Añádelas de nuevo en Ajustes, Claves API.",
     "{p, number} de {pn, number} proyectos · {t, number} de {tn, number} hilos · {e, number} de {en, number} eventos",
@@ -18193,12 +18284,12 @@ object Msg {
     "Reinicios y actualizaciones",
     "Activado. Los turnos interrumpidos por un reinicio continúan por sí solos.",
     "Desactivado. Un reinicio detiene los turnos en curso y los inicias de nuevo.",
-    "El hub sigue ejecutándose al cerrar la ventana, así los agentes terminan su trabajo. Este hub se actualiza mediante el instalador o paquete del que vino. Para actualizar, ejecuta el comando de instalación de nuevo. Ajustes, Red y actualizaciones muestra la versión y el canal de actualización. Ajustes, Hilos define qué ocurre con los turnos en curso cuando el hub se reinicia.",
-    "El hub sigue ejecutándose al cerrar la ventana, así los agentes terminan su trabajo. Este hub busca una nueva compilación cada hora en el canal {channel} y la instala cuando no hay ningún turno en curso. Si la nueva compilación falla su comprobación de salud, el hub vuelve a la que tenía. Los teléfonos vinculados muestran la misma línea en sus Ajustes. Ajustes, Red y actualizaciones muestra la versión y el canal de actualización. Ajustes, Hilos define qué ocurre con los turnos en curso cuando el hub se reinicia.",
+    "El hub sigue ejecutándose al cerrar la ventana, así los agentes terminan su trabajo. Este hub se actualiza mediante el instalador o paquete del que vino. Para actualizar, ejecuta el comando de instalación de nuevo. Ajustes, Acerca de y actualizaciones muestra la versión y el canal de actualización. Ajustes, Hilos y git define qué ocurre con los turnos en curso cuando el hub se reinicia.",
+    "El hub sigue ejecutándose al cerrar la ventana, así los agentes terminan su trabajo. Este hub busca una nueva compilación cada hora en el canal {channel} y la instala cuando no hay ningún turno en curso. Si la nueva compilación falla su comprobación de salud, el hub vuelve a la que tenía. Los teléfonos vinculados muestran la misma línea en sus Ajustes. Ajustes, Acerca de y actualizaciones muestra la versión y el canal de actualización. Ajustes, Hilos y git define qué ocurre con los turnos en curso cuando el hub se reinicia.",
     "Continuar tras un reinicio",
     "Abrir la página",
-    "Cierra la configuración y abre Ajustes, Red y actualizaciones. Finalizar configuración en la barra lateral te trae de vuelta.",
-    "Red y actualizaciones",
+    "Cierra la configuración y abre Ajustes, Acerca de y actualizaciones. Finalizar configuración en la barra lateral te trae de vuelta.",
+    "Acerca de y actualizaciones",
     "Tu primer proyecto",
     "Un proyecto es una carpeta, normalmente con un proyecto de KiCad dentro. Indica una carpeta existente para añadirla, o una ruta nueva para crearla. En un repositorio git, cada hilo trabaja en su propio worktree, así los hilos no tocan los archivos de los demás.",
     "Añadir otro proyecto.",
@@ -18236,9 +18327,9 @@ object Msg {
     "Una sala es un chat compartido para ti y tus bots. Elige quién se une y publica. Cada bot lee la sala y responde allí, así que dos bots pueden revisar el trabajo del otro mientras miras. Las salas también funcionan entre máquinas vinculadas.",
     "Crear una sala",
     "Nueva sala",
-    "Una rutina ejecuta un bot de forma programada. Abre un bot, luego su pestaña Rutinas y escribe qué debe hacer y cuándo. Backplane lee horas como tomorrow 9am, monday 09:00, in 20m o 2026-10-14 09:00. Las rutinas siguen tu zona horaria, que muestra Ajustes, Zona horaria. Los recordatorios usan la misma lista.",
+    "Una rutina ejecuta un bot de forma programada. Abre un bot, luego su pestaña Rutinas y escribe qué debe hacer y cuándo. Backplane lee horas como tomorrow 9am, monday 09:00, in 20m o 2026-10-14 09:00. Las rutinas siguen tu zona horaria, que muestra Ajustes, Notificaciones. Los recordatorios usan la misma lista.",
     "Paleta y atajos",
-    "{m}+K abre la paleta. Escribe parte del nombre de un hilo o un comando y pulsa Enter. Ajustes, Este dispositivo lista cada atajo y te permite cambiarlos.",
+    "{m}+K abre la paleta. Escribe parte del nombre de un hilo o un comando y pulsa Enter. Ajustes, Teclado lista cada atajo y te permite cambiarlos.",
     "Agente, modelo y esfuerzo",
     "Hilo anterior y siguiente",
     "{m}+Shift+[ y {m}+Shift+]",
@@ -18319,6 +18410,8 @@ object Msg {
     "Permitir alertas",
     "Ahora no",
     "Fondo 3D",
+  )
+  private fun es12(): Array<String> = arrayOf(
     "Automático",
     "Claro",
     "Oscuro",
@@ -18338,8 +18431,6 @@ object Msg {
     "Esa sala no está en este hub.",
     "conectando a {hub}…",
     "sin conexión · mostrando lo que este teléfono tiene guardado",
-  )
-  private fun es12(): Array<String> = arrayOf(
     "Hub",
     "Añadir un hub",
     "Volver a vincular este dispositivo",
@@ -18571,6 +18662,8 @@ object Msg {
     "Sin cambios.",
     "Ejecutar comprobaciones",
     "Nada que mostrar.",
+  )
+  private fun es13(): Array<String> = arrayOf(
     "Sin comentarios aún. Añade uno abajo; el agente lee los abiertos con su siguiente mensaje.",
     "resuelto",
     "reabrir",
@@ -18590,8 +18683,6 @@ object Msg {
     "Nada recibido del micrófono aún. ¿Está conectado? Elige otro en Ajustes, Voz.",
     "Solo silencio desde el micrófono hasta ahora. ¿Está silenciado o es el equivocado?",
     "Saltar",
-  )
-  private fun es13(): Array<String> = arrayOf(
     "Se oyó “{word}” (1 de {count})",
     "{heard} descartado ↶",
     "Un hub en un registro copiado no puede instalar ni quitar modelos de voz.",
@@ -18823,6 +18914,8 @@ object Msg {
     "Sesión caducada. Inicia sesión de nuevo.",
     "Error al autenticar: la sesión de esta cuenta caducó. Inicia sesión de nuevo en Ajustes, Cuentas.",
     "Falló la operación de la cuenta. Comprueba su estado actual antes de reintentar.",
+  )
+  private fun es14(): Array<String> = arrayOf(
     "Claude no reporta límites para esta cuenta (puede que no sea un plan de suscripción).",
     "Claude no reportó ventanas de límite para esta cuenta.",
     "No se pudo verificar el inicio de sesión. Reintenta o comprueba la instalación de la CLI del proveedor.",
@@ -18842,8 +18935,6 @@ object Msg {
     "Claude rechazó la petición: {reason}",
     "La respuesta de la CLI de Claude fue demasiado grande.",
     "La CLI de Claude se cerró antes de reportar el uso.",
-  )
-  private fun es14(): Array<String> = arrayOf(
     "La CLI de Claude no respondió en 30 segundos.",
     "El servicio de uso de Claude respondió con algo distinto al uso.",
     "Claude rechazó la petición: token OAuth rechazado (código de estado 401).",
@@ -19075,6 +19166,8 @@ object Msg {
     "{n, plural, one {1 elemento se queda en 0.14 porque este hub ya usa su nombre para otra cosa.} other {# elementos se quedan en 0.14 porque este hub ya usa sus nombres para otra cosa.}}",
     "El estado de turnos, colas, despertares, bloqueos y medidores de uso empiezan limpios aquí.",
     "0.14 sigue ejecutándose. Importa de nuevo más tarde para traer lo que añada después de ahora.",
+  )
+  private fun es15(): Array<String> = arrayOf(
     "La carpeta de {name} ocupa {gb} GB y permanece en {path}. Sus hilos y memoria sí se trajeron.",
     "No se pudo copiar {path}: {why}.",
     "Inicia sesión de nuevo en {names}. Su historial sí se trajo.",
@@ -19094,8 +19187,6 @@ object Msg {
     "tú dijiste",
     "el agente dijo",
     "el hilo",
-  )
-  private fun es15(): Array<String> = arrayOf(
     "Volver a {title}",
     "Los pasos de este subagente ya no se conservan.",
     "{n, plural, one {# paso anterior no mostrado} other {# pasos anteriores no mostrados}}",
@@ -19207,6 +19298,7 @@ object Msg {
     "renombrado",
     "binario",
     "Avanzado",
+    "Elegir un archivo",
     "conectando",
     "{n, number} ejecutándose",
     "Bub puede avisarte cuando un hilo te necesite.",
@@ -19326,6 +19418,8 @@ object Msg {
     "resuelto",
     "reabrir",
     "resolver",
+  )
+  private fun es16(): Array<String> = arrayOf(
     "Cerrados ({n})",
     "Chats sin proyecto ({n})",
     "Color {n}",
@@ -19346,8 +19440,6 @@ object Msg {
     "Esperando al hub…",
     "El hub está {status}…",
     "El hub está caído.",
-  )
-  private fun es16(): Array<String> = arrayOf(
     "El hub está activo en modo seguro, degradado.",
     "El hub está activo, degradado.",
     "El hub está activo en modo seguro.",
@@ -19560,7 +19652,7 @@ object Msg {
     "Comprar · estimación incompleta",
     "Buscar proyectos…",
     "NOTIFICACIONES",
-    "Ajustes, Este dispositivo los cambia. Esc cierra esto.",
+    "Ajustes, Teclado los cambia. Esc cierra esto.",
     "Atajos de teclado: esta lista. ? fuera de un cuadro de texto, F1 en cualquier sitio",
     "Backplane ejecuta agentes de programación sobre tus placas, esquemáticos y piezas mecánicas. Seis pasos cortos lo configuran, y cada uno se puede saltar. Terminar luego cierra la configuración hasta el próximo inicio.",
     "{home}. Tus hilos, ajustes, bots y claves se guardan aquí, y el hub ejecuta tus agentes desde ahí.",
@@ -19578,6 +19670,8 @@ object Msg {
     "Versión {v}. Conectado como {who}.",
     "Instalado. Conectado.",
     "Instalado. Conectado como {who}.",
+  )
+  private fun es17(): Array<String> = arrayOf(
     "Versión {v}. No conectado.",
     "Instalado. No conectado.",
     "Versión {v}. Si aún no ha iniciado sesión, ejecuta {cmd} en una terminal.",
@@ -19598,8 +19692,6 @@ object Msg {
     "Dónde vive tu uberbot",
     "Siempre activo mantiene tu uberbot, recordatorios, bots y alertas telefónicas funcionando mientras este ordenador duerme. El hardware y el código siguen ejecutándose aquí.",
     "Quedarse en este ordenador",
-  )
-  private fun es17(): Array<String> = arrayOf(
     "Tu uberbot se ejecuta aquí, mientras este ordenador está encendido. Puedes moverlo luego en Ajustes, Máquinas.",
     "Un Boat siempre activo",
     "Un Boat es un pequeño servidor en la nube en tu propia cuenta de Boat. Backplane lo configura y lo mantiene, y mantiene en marcha tu uberbot, tus bots, recordatorios y alertas del teléfono mientras este ordenador está apagado o en reposo. Boat te factura a ti, no Backplane: los planes empiezan en 20 \$ al mes, y un Boat pequeño funcionando todo el mes usa unos 13 \$ de eso. Puedes devolver tu uberbot aquí y eliminar el Boat en Ajustes, Máquinas.",
@@ -19617,7 +19709,7 @@ object Msg {
     "Opcional. Consigue la app, muestra el código aquí y escanéalo. El teléfono abre tu uberbot.",
     "Escanea esto con la app de Backplane, o escribe el código corto y esta dirección. Funciona una vez, durante diez minutos. Trátalo como una contraseña.",
     "Mostrar el código",
-    "Pulsa ? en cualquier momento para ver los atajos.",
+    "Pulsa F1 en cualquier momento para ver los atajos.",
     "Abrir el uberbot",
     "La configuración se ejecuta en un ordenador, en Ajustes, Configuración allí. Este teléfono está vinculado a él.",
     "Seis pasos cortos: agentes, herramientas de diseño, el nombre de tu uberbot, dónde vive y un primer proyecto.",
@@ -19830,6 +19922,8 @@ object Msg {
     "Filtrar",
     "Sin piezas.",
     "DNP",
+  )
+  private fun es18(): Array<String> = arrayOf(
     "Fab",
     "Los límites del fabricante están en las reglas DRC",
     "Las reglas DRC tienen límites anteriores del fabricante",
@@ -19850,8 +19944,6 @@ object Msg {
     "Cuesta más",
     "Leído",
     "* calculado desde la página del fabricante (un mil en mm, un anillo desde un diámetro). Atenuado: el valor de la placa rígida, cuando la página de esta placa no dice otra cosa. Una fecha abre la página de la que se leyó.",
-  )
-  private fun es18(): Array<String> = arrayOf(
     "{what}: configuración de placa {project} mm, el fabricante {fab} mm",
     "rev {rev}, leído {day}",
     "Revisando el diseño…",
@@ -20082,6 +20174,8 @@ object Msg {
     "Nada está asignado a desplazar",
     "Nada está asignado a zoom",
     "Nada está asignado a girar",
+  )
+  private fun es19(): Array<String> = arrayOf(
     "Solo lectura",
     "Modo revisión: los archivos de diseño son de solo lectura en este hilo",
     "Solo lectura: esta petición parecía una revisión, así que Backplane rechaza cambios en los archivos de diseño.",
@@ -20094,6 +20188,7 @@ object Msg {
     "Este proyecto no tiene esquema",
     "La vista dividida requiere una placa y un esquema",
     "Este proyecto no tiene piezas mecánicas",
+    "Abre un hilo para usar esto",
     "Pide a un agente que diseñe una placa.",
     "Pide a un agente que dibuje uno.",
     "Pide a un agente que diseñe una placa.",
@@ -20102,8 +20197,6 @@ object Msg {
     "No hay placa con la que comparar estos Gerber.",
     "Añade una placa a este proyecto para compararlos.",
     "Aún no hay piezas mecánicas en este proyecto",
-  )
-  private fun es19(): Array<String> = arrayOf(
     "Pide a un agente que modele una, o añade un archivo STEP en mech/.",
     "Cargando las vistas…",
     "Reintentando…",
@@ -20333,6 +20426,8 @@ object Msg {
     "{found} de {total} contienen “{q}”.",
     "Sin transcribir",
     "Las palabras de la aplicación Pebble",
+  )
+  private fun es20(): Array<String> = arrayOf(
     "Transcrito por {model}",
     "Transcrito por {model}, {conf}% de certeza",
     "entregada a Pebble",
@@ -20353,9 +20448,8 @@ object Msg {
     "No se pudo crear el contenedor integrado de SolidCraft.",
     "SolidCraft está abierto en su propia ventana.",
     "SolidCraft no está instalado.",
-    "Instala SolidCraft v0.50.0 (~228 MB) para ver y editar archivos STEP, SolidCraft, STL y malla.",
-  )
-  private fun es20(): Array<String> = arrayOf(
+    "Instala SolidCraft {version} (unos {mb} MB) para ver y editar archivos STEP, SolidCraft, STL y malla.",
+    "Instala SolidCraft para ver y editar archivos STEP, SolidCraft, STL y malla.",
     "Instalar SolidCraft",
     "Instalando SolidCraft…",
     "Descargando…",
@@ -20417,6 +20511,8 @@ object Msg {
     "Dónde se abre una pieza mecánica en el escritorio: en SolidCraft, para verla y editarla, o en el visor 3D de Backplane, solo para ver y más rápido. La cabecera de la pestaña Mech cambia entre ellos por un tiempo.",
     "SolidCraft",
     "Visor de Backplane",
+    "Cortar",
+    "Copiar mensaje",
   )
   internal val es: Array<String> by lazy { arrayOf(*es0(), *es1(), *es2(), *es3(), *es4(), *es5(), *es6(), *es7(), *es8(), *es9(), *es10(), *es11(), *es12(), *es13(), *es14(), *es15(), *es16(), *es17(), *es18(), *es19(), *es20()) }
   private fun exactText0(): Array<String> = arrayOf(
@@ -20666,7 +20762,7 @@ object Msg {
     "Paste the address Google sent you to",
     "Open Google's sign-in",
     "Sign-in failed",
-    "No answer came back (Settings, Writing: the model it asks).",
+    "No answer came back (Settings, Agents: the model it asks).",
     "every minute",
     "every hour",
     "hourly",
@@ -20764,7 +20860,7 @@ object Msg {
     "No setting matches.",
     "Projects groups threads by project; active lists what is going on, what needs you first.",
     "Active",
-    "Network and updates",
+    "About and updates",
     "Update channel",
     "Stable takes releases; nightly also takes the daily builds.",
     "Nightly",
@@ -21594,6 +21690,7 @@ object Msg {
     "No matches",
     "Find in this thread",
     "Find in thread",
+    "Find in all threads",
     "Previous match",
     "Next match",
     "Back to the thread",
@@ -21618,10 +21715,17 @@ object Msg {
     "Home machine",
     "Make this machine the home",
     "General",
-    "Agents and tools",
     "Workspace",
     "Web UI",
     "Shared files",
+    "Threads and git",
+    "Git",
+    "Network",
+    "Board and schematic: each input",
+    "3D and STEP: each input",
+    "A preset sets every input (each one is under Advanced). Each input does one thing: choosing an action for an input replaces what it did.",
+    "Every device",
+    "Advanced",
     "Could not keep this draft on this device. Retry.",
     "Describe the change…",
     "Describe the behavior in detail: what you did and what you saw.",
@@ -21670,6 +21774,8 @@ object Msg {
     "Choose an image up to 10 MB.",
     "Could not keep this image on this device. Retry.",
     "Image refreshed.",
+  )
+  private fun exactText5(): Array<String> = arrayOf(
     "This window cannot be recorded here.",
     "Finishing recording…",
     "Could not keep the recording on this device.",
@@ -21678,8 +21784,6 @@ object Msg {
     "Could not open it. Copy the text and paste it into GitHub.",
     "No folder to save in.",
     "Could not save the file.",
-  )
-  private fun exactText5(): Array<String> = arrayOf(
     "Playing the recording. Select it when you have reviewed the whole clip.",
     "Exact issue text copied.",
     "Review the report and press Open GitHub draft when ready.",
@@ -21771,7 +21875,7 @@ object Msg {
     "now",
     " · resets now",
     "Webhook name",
-    "No tasks yet. Teach this bot a browser task and it shows here.",
+    "No tasks yet. Tasks this bot learns in its Browser tab are listed here.",
     "Infinite context",
     "Each turn starts fresh with the whole conversation as a tree of one-line summaries, recent messages in full and older ones merged; the bot zooms into any line, down to the original message. A cheaper model writes the summaries in the background.",
     "caught up",
@@ -21780,12 +21884,12 @@ object Msg {
     "Nothing to report.",
     "No mail.",
     "This space is a web page; it is shown in the phone apps.",
-    "No space yet. The bot writes it with space_set.",
+    "No space yet. A space is a page this bot keeps for you; ask it in Chat to make one.",
     "Created",
     "The hub refused it.",
     "Webhook made. Keep its secret: it is shown only now.",
     "Path",
-    "No hooks.",
+    "No webhooks.",
     "No token",
     "No messages yet.",
     "Keep this room",
@@ -21823,7 +21927,7 @@ object Msg {
     "New line in the message",
     "Send (also)",
     "Put the keyboard in the message box",
-    "Put the keyboard in the message box, from anywhere (a field, a viewer, a dialog)",
+    "Put the keyboard in the message box from anywhere",
     "Agent, model and effort",
     "Account of this thread, with what each has left",
     "Pick account 1…9 in the account menu",
@@ -21844,6 +21948,10 @@ object Msg {
     "Next thread",
     "Uberbot chat",
     "Settle or unsettle the thread",
+    "Rename the open thread",
+    "Larger text",
+    "Smaller text",
+    "Text size back to normal (100%)",
     "Stop the running turn",
     "Layer focus: the other layers as they are, dimmed, hidden",
     "Undo the last stroke or change",
@@ -21918,6 +22026,8 @@ object Msg {
     "New folder",
     "Rename to",
     "Empty folder. Drop files here to upload.",
+  )
+  private fun exactText6(): Array<String> = arrayOf(
     "Nothing matches",
     "Could not load the file",
     "Drawing the page…",
@@ -21930,8 +22040,6 @@ object Msg {
     "Open in KiCad (embedded)",
     "That file does not open here.",
     "Open a thread first: that file is in no project here.",
-  )
-  private fun exactText6(): Array<String> = arrayOf(
     "Gerbers open on their project's Board; this one is in no project.",
     "That KiCad project has no board or schematic beside it.",
     "That file is not on this hub.",
@@ -22087,7 +22195,7 @@ object Msg {
     "Connecting…",
     "Disconnected",
     "Hub is opening its log…",
-    "Hub disconnected. Draft kept; reconnecting. Check the experimental hub log.",
+    "Hub disconnected. Draft kept; reconnecting. If it stays like this, restart Backplane.",
     "This thread, bot or room is not on this hub: it was deleted, or it is on another machine.",
     "no reason given",
     "This invitation names only its hub's own computer (127.0.0.1), so this device cannot reach it. Start the hub with Tailscale on, or on an address this device can reach, then make a new invitation.",
@@ -22170,6 +22278,8 @@ object Msg {
     "Search this thread",
     "Jump to a thread or run a command",
     "Jump to a thread, run a command or find what was said",
+  )
+  private fun exactText7(): Array<String> = arrayOf(
     "Type a word said in this thread",
     "approval",
     "question",
@@ -22182,8 +22292,6 @@ object Msg {
     "GOAL & NOTES",
     "No goal yet. Ask an agent to write what this project is for, or edit .backplane/intent.md.",
     "Edit goal & notes",
-  )
-  private fun exactText7(): Array<String> = arrayOf(
     "No threads yet.",
     "No models",
     "Speed",
@@ -22339,6 +22447,8 @@ object Msg {
     "A push waits until the end of quiet hours, in your time zone, and goes then as one.",
     "Quiet from and until",
     "HH:MM, 24 hours.",
+    "From, 22:00",
+    "Until, 07:00",
     "Times are HH:MM, 24 hours, and not the same.",
     "Quiet hours are HH:MM to HH:MM, 24 hours, and not the same time twice.",
     "Urgent asks come through",
@@ -22358,6 +22468,8 @@ object Msg {
     "Use the default order",
     "Choose an installed provider, and a model or its default, then add it to the end.",
     "Add to the order",
+    "Already in the order.",
+    "Not installed on this machine.",
     "Ring",
     "Pebble Index ring",
     "Test event",
@@ -22418,6 +22530,8 @@ object Msg {
     "Pause while",
     "Paused, the microphone is closed; it listens again by itself.",
     "Apps that may use the microphone (comma separated)",
+  )
+  private fun exactText8(): Array<String> = arrayOf(
     "The screen is locked",
     "Another app uses the microphone",
     "Backplane is in the background",
@@ -22434,8 +22548,6 @@ object Msg {
     "Group projects",
     "On: projects with nothing going on lately are grouped by their git owner, or else their folder. Off: one list, and only the groups you make.",
     "No group",
-  )
-  private fun exactText8(): Array<String> = arrayOf(
     "Install FreeCAD",
     "Install FreeCAD?",
     "Installing FreeCAD",
@@ -22470,7 +22582,7 @@ object Msg {
     "Add ~/.local/bin to your PATH to run backplane from a terminal.",
     "Backplane is not on your PATH. Open it from its folder or the Start menu.",
     "Updates",
-    "Settings, Network and updates picks the stable or the nightly channel.",
+    "Settings, About and updates picks the stable or the nightly channel.",
     "Where your data is kept",
     "Backplane keeps your threads, settings, bots and keys in one folder on this computer. A background program, the hub, runs your agents from that folder. It keeps running when you close the window, so agents finish their work. Each computer usually has one.",
     "Data folder",
@@ -22582,9 +22694,9 @@ object Msg {
     "Restarts and updates",
     "On. Turns that a restart cuts short go on by themselves.",
     "Off. A restart stops running turns, and you start them again.",
-    "The hub keeps running when you close the window, so agents finish their work. This hub is updated by the installer or package it came from. To update, run the install command again. Settings, Network and updates shows the version and the update channel. Settings, Threads sets what happens to running turns when the hub restarts.",
+    "The hub keeps running when you close the window, so agents finish their work. This hub is updated by the installer or package it came from. To update, run the install command again. Settings, About and updates shows the version and the update channel. Settings, Threads and git sets what happens to running turns when the hub restarts.",
     "Open the page",
-    "Closes setup and opens Settings, Network and updates. Finish setup in the sidebar brings you back.",
+    "Closes setup and opens Settings, About and updates. Finish setup in the sidebar brings you back.",
     "Your first project",
     "A project is a folder, usually with a KiCad project in it. Give a folder that exists to add it, or a new path to make it. In a git repository, each thread works in its own worktree, so threads do not touch each other's files.",
     "Add another project.",
@@ -22611,7 +22723,7 @@ object Msg {
     "Each bot has a Space tab, a page the bot writes for you with its space_set tool. It can hold a status, a table, buttons and fields to fill in, for example a parts list with an Order button. Ask the bot to build one: make me a space that tracks the open BOM questions. A new bot has an empty space.",
     "A room is a shared chat for you and your bots. Pick who joins, then post. Each bot reads the room and answers there, so two bots can review each other's work while you watch. Rooms work across linked machines too.",
     "Make a room",
-    "A routine runs a bot on a schedule. Open a bot, then its Routines tab, and write what it should do and when. Backplane reads times like tomorrow 9am, monday 09:00, in 20m or 2026-10-14 09:00. Routines follow your time zone, which Settings, Time zone shows. Reminders use the same list.",
+    "A routine runs a bot on a schedule. Open a bot, then its Routines tab, and write what it should do and when. Backplane reads times like tomorrow 9am, monday 09:00, in 20m or 2026-10-14 09:00. Routines follow your time zone, which Settings, Notifications shows. Reminders use the same list.",
     "Palette and shortcuts",
     "Previous and next thread",
     "Try it",
@@ -22670,6 +22782,8 @@ object Msg {
     "Bub can alert you when a thread needs you.",
     "Allow alerts",
     "3D background",
+  )
+  private fun exactText9(): Array<String> = arrayOf(
     "#rrggbb",
     "This device. The Mech and 3D viewers; Auto follows the appearance.",
     "monitoring",
@@ -22686,8 +22800,6 @@ object Msg {
     "uberbot",
     "No threads",
     "Microphone access is off for Backplane. Turn it on in Settings, then press the mic again.",
-  )
-  private fun exactText9(): Array<String> = arrayOf(
     "That picture could not be read.",
     "Buy it did not start.",
     "That photo could not be read.",
@@ -22922,6 +23034,8 @@ object Msg {
     "Finish or stop the current turn before selecting another account.",
     "Switch this thread to that agent first, then pick the account.",
     "The thread or account selection changed. Reopen the account menu and try again.",
+  )
+  private fun exactText10(): Array<String> = arrayOf(
     "Accounts are not available; select the default account",
     "Goal and notes changed. Reload before saving; your edit is retained.",
     "Goal and notes changed while saving. Your edit is retained.",
@@ -22938,8 +23052,6 @@ object Msg {
     "The hub also answers here: plain HTTP on that network, not encrypted. Every device still has to pair.",
     "Kept, but this computer does not have this address now.",
     "Stop answering here",
-  )
-  private fun exactText10(): Array<String> = arrayOf(
     "Pairing link · open",
     "Pairing link · used",
     "Tailscale",
@@ -23174,6 +23286,8 @@ object Msg {
     "First message to every member",
     "Add member",
     "Role (optional)",
+  )
+  private fun exactText11(): Array<String> = arrayOf(
     "Stop swarm",
     "Keep it running",
     "paused",
@@ -23190,8 +23304,6 @@ object Msg {
     "Cat",
     "Its own",
     "Different cat",
-  )
-  private fun exactText11(): Array<String> = arrayOf(
     "The name's cat",
     "Type a colour like #6fb3f2.",
     "This hub has no terminal for chats yet. Update it to use one here.",
@@ -23231,7 +23343,7 @@ object Msg {
     "deleted",
     "renamed",
     "binary",
-    "Advanced",
+    "Choose a file",
     "connecting",
     "Colour",
     "Behind Mech parts and the 3D board, on this phone. Auto follows the appearance.",
@@ -23320,7 +23432,7 @@ object Msg {
     "Close find",
     "Sending",
     "NOTIFICATIONS",
-    "Settings, This device changes them. Esc closes this.",
+    "Settings, Keyboard changes them. Esc closes this.",
     "Keyboard shortcuts: this list. ? outside a text box, F1 anywhere",
     "Backplane runs coding agents on your boards, schematics and mechanical parts. Six short steps set it up, and each one can be skipped. Finish later closes setup until the next launch.",
     "Choose another",
@@ -23358,7 +23470,7 @@ object Msg {
     "Optional. Get the app, then show the code here and scan it. The phone opens your uberbot.",
     "Scan this with the Backplane app, or type the short code and this address. It works once, for ten minutes. Treat it as a password.",
     "Show the code",
-    "Press ? any time for keys.",
+    "Press F1 any time for keys.",
     "Open the uberbot",
     "Setup runs on a computer, in Settings, Setup there. This phone is paired with it.",
     "Six short steps: agents, design tools, your uberbot's name, where it lives and a first project.",
@@ -23426,6 +23538,8 @@ object Msg {
     "Rename group",
     "Pin project",
     "Unpin project",
+  )
+  private fun exactText12(): Array<String> = arrayOf(
     "Make quiet",
     "Back to Active",
     "Nothing for two weeks, or made quiet",
@@ -23442,8 +23556,6 @@ object Msg {
     "Open the thread",
     "Open the project",
     "Loading your GitHub repositories…",
-  )
-  private fun exactText12(): Array<String> = arrayOf(
     "Sign in to GitHub to see your repositories here",
     "Sign in to GitHub: enter this code at the address below, on any device.",
     "Asking GitHub for a sign-in code…",
@@ -23678,6 +23790,8 @@ object Msg {
     "Read-only",
     "Review mode: the design files are read-only for this thread",
     "Read-only: this request looked like a review, so Backplane refuses changes to the design files.",
+  )
+  private fun exactText13(): Array<String> = arrayOf(
     "Allow edits",
     "Switch review mode off: the agent may change the design files",
     "Edits allowed: you switched review mode off for this thread.",
@@ -23687,6 +23801,7 @@ object Msg {
     "No schematic in this project",
     "Split needs a board and a schematic",
     "No mechanical parts in this project",
+    "Open a thread to use this",
     "Ask an agent to lay one out.",
     "Ask an agent to draw one.",
     "Ask an agent to lay out a board.",
@@ -23694,8 +23809,6 @@ object Msg {
     "Ask an agent to export fabrication files into mfg/.",
     "No board to compare these Gerbers against.",
     "Add a board to this project to compare them.",
-  )
-  private fun exactText13(): Array<String> = arrayOf(
     "No mechanical parts in this project yet",
     "Ask an agent to model one, or add a STEP file to mech/.",
     "Loading the views…",
@@ -23890,7 +24003,7 @@ object Msg {
     "Could not create embedded SolidCraft container window.",
     "SolidCraft is open in its own window.",
     "SolidCraft is not installed.",
-    "Install SolidCraft v0.50.0 (~228 MB) to view and edit STEP, SolidCraft, STL, and mesh files.",
+    "Install SolidCraft to view and edit STEP, SolidCraft, STL, and mesh files.",
     "Install SolidCraft",
     "Installing SolidCraft…",
     "Downloading…",
@@ -23929,16 +24042,20 @@ object Msg {
     "Show this part in Backplane's own 3D viewer (view only)",
     "View and edit this part in SolidCraft",
     "View directly in Backplane instead",
+  )
+  private fun exactText14(): Array<String> = arrayOf(
     "Always view parts in Backplane (change it in Settings › CAD)",
     "Mech tab",
     "Where a mechanical part opens on the desktop: in SolidCraft, to view and edit it, or in Backplane's own 3D viewer, view only and quick. The Mech tab's header switches between them for a while.",
     "SolidCraft",
     "Backplane's viewer",
+    "Cut",
+    "Copy message",
   )
-  internal val exactText: Array<String> by lazy { arrayOf(*exactText0(), *exactText1(), *exactText2(), *exactText3(), *exactText4(), *exactText5(), *exactText6(), *exactText7(), *exactText8(), *exactText9(), *exactText10(), *exactText11(), *exactText12(), *exactText13()) }
-  internal val exactKey: IntArray by lazy { intArrayOf(0, 1, 2, 3, 4, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 3171, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 43, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 3739, 61, 62, 63, 64, 3597, 67, 69, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 85, 86, 3778, 88, 89, 99, 100, 3100, 3777, 103, 104, 106, 107, 108, 110, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 156, 157, 158, 160, 162, 163, 164, 3220, 166, 167, 3222, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 3181, 184, 188, 190, 194, 195, 196, 198, 199, 200, 201, 202, 203, 207, 210, 214, 216, 217, 218, 220, 221, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 235, 236, 2987, 238, 239, 240, 241, 3738, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 261, 263, 264, 265, 266, 267, 268, 271, 272, 273, 274, 276, 280, 281, 282, 283, 287, 288, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299, 301, 302, 3192, 306, 307, 308, 309, 310, 311, 312, 314, 315, 316, 318, 320, 334, 3786, 337, 3785, 3788, 341, 3798, 343, 344, 345, 346, 355, 3169, 358, 359, 360, 361, 362, 363, 364, 365, 366, 367, 368, 369, 370, 371, 372, 373, 374, 2990, 377, 378, 379, 380, 381, 382, 383, 384, 385, 386, 387, 388, 389, 390, 391, 392, 393, 394, 395, 396, 397, 398, 399, 400, 401, 402, 403, 404, 405, 406, 407, 408, 409, 410, 411, 412, 413, 414, 415, 416, 417, 418, 419, 421, 422, 423, 424, 425, 426, 427, 428, 429, 430, 431, 2982, 2983, 434, 435, 436, 437, 438, 439, 440, 441, 442, 443, 444, 445, 446, 447, 448, 449, 450, 451, 452, 453, 455, 456, 457, 3199, 459, 460, 461, 462, 463, 2972, 465, 466, 467, 3102, 469, 470, 471, 472, 473, 474, 475, 476, 477, 478, 479, 480, 481, 482, 483, 484, 485, 486, 487, 488, 489, 490, 491, 492, 493, 494, 495, 496, 497, 498, 499, 500, 501, 502, 503, 504, 505, 506, 507, 508, 509, 510, 511, 512, 513, 514, 515, 516, 517, 518, 519, 520, 521, 522, 523, 524, 525, 526, 527, 528, 529, 530, 531, 532, 533, 534, 535, 536, 537, 538, 539, 540, 541, 542, 543, 544, 545, 546, 547, 548, 549, 550, 551, 552, 553, 554, 555, 556, 558, 559, 560, 561, 562, 563, 564, 565, 567, 568, 569, 570, 571, 572, 573, 574, 575, 576, 577, 578, 579, 580, 594, 630, 631, 632, 3207, 3208, 638, 639, 640, 641, 642, 643, 644, 645, 646, 647, 648, 649, 653, 654, 3851, 656, 658, 659, 661, 665, 666, 667, 668, 669, 670, 671, 672, 673, 674, 675, 676, 677, 678, 679, 680, 682, 683, 684, 685, 686, 688, 689, 691, 692, 694, 695, 696, 697, 700, 706, 726, 730, 731, 732, 733, 734, 3783, 736, 737, 738, 739, 3206, 741, 742, 743, 744, 745, 746, 747, 748, 749, 750, 751, 752, 753, 754, 755, 756, 757, 758, 759, 760, 761, 762, 763, 764, 765, 766, 767, 768, 769, 770, 771, 772, 773, 774, 775, 776, 777, 778, 779, 780, 781, 782, 783, 784, 785, 786, 787, 788, 789, 790, 791, 792, 793, 794, 795, 796, 797, 798, 799, 800, 801, 802, 803, 804, 805, 3766, 807, 808, 809, 810, 811, 812, 813, 814, 815, 816, 817, 818, 819, 820, 821, 822, 823, 824, 825, 826, 827, 828, 829, 830, 831, 834, 835, 836, 837, 838, 839, 840, 841, 842, 843, 845, 846, 847, 849, 850, 3202, 852, 854, 855, 856, 859, 860, 861, 862, 863, 864, 865, 866, 867, 868, 869, 3776, 871, 872, 873, 874, 875, 876, 877, 878, 879, 880, 881, 882, 883, 884, 885, 886, 887, 888, 889, 890, 891, 892, 893, 894, 895, 896, 897, 898, 899, 900, 901, 902, 903, 3853, 905, 906, 909, 910, 911, 912, 913, 914, 915, 916, 917, 918, 919, 920, 921, 922, 923, 924, 925, 926, 927, 928, 929, 930, 931, 932, 933, 934, 935, 936, 937, 938, 939, 940, 941, 942, 943, 944, 945, 946, 947, 948, 949, 950, 951, 952, 953, 954, 955, 956, 957, 958, 959, 960, 961, 962, 963, 964, 3172, 966, 967, 968, 969, 970, 971, 3801, 973, 3027, 3084, 976, 977, 978, 980, 981, 989, 990, 991, 993, 994, 995, 997, 998, 999, 1000, 1001, 1002, 1003, 1004, 1005, 1007, 1008, 1009, 1010, 1011, 1012, 1013, 1014, 1015, 1016, 1017, 1018, 1019, 1020, 3804, 1022, 1023, 1024, 1027, 1031, 1032, 1033, 2979, 3053, 1036, 1037, 1038, 1039, 1040, 1041, 1042, 1043, 1044, 1045, 1047, 1048, 1051, 1052, 1053, 1054, 1055, 1056, 1057, 1058, 1059, 1060, 1061, 1062, 1063, 1064, 1065, 1066, 1067, 1068, 1069, 1070, 1071, 1072, 1073, 1074, 1076, 1084, 1085, 1088, 1089, 1090, 1092, 1093, 1094, 3818, 1096, 1097, 1100, 1101, 1102, 3201, 1104, 1105, 1106, 1107, 1108, 1109, 1110, 1112, 1113, 1114, 1115, 1116, 1117, 1118, 3803, 1122, 1125, 1126, 1127, 1129, 1130, 1131, 1132, 1133, 1134, 1135, 1136, 1137, 1138, 1139, 1140, 1141, 1142, 1143, 1144, 1145, 1146, 1147, 1148, 1152, 1153, 1154, 1155, 1156, 1157, 1160, 1164, 1165, 1167, 1172, 1173, 1174, 1175, 1178, 1180, 1182, 1183, 1184, 1186, 1187, 1188, 1189, 1190, 1191, 1192, 1193, 1194, 1195, 1196, 1197, 1199, 1200, 1201, 1202, 1203, 1204, 1205, 1208, 1209, 1210, 1211, 1212, 1213, 1214, 1215, 1216, 1217, 1218, 1219, 1220, 1222, 1224, 1225, 2981, 1227, 1228, 1229, 1230, 1231, 1232, 1233, 1234, 1235, 1236, 1237, 1238, 1239, 1242, 1243, 1246, 1247, 1248, 1249, 1250, 1252, 1255, 1256, 1257, 1258, 1259, 1260, 1262, 1263, 1264, 1265, 1266, 1267, 1268, 1269, 1271, 1272, 1273, 1274, 1275, 1276, 1277, 1279, 1280, 1281, 1282, 1283, 1290, 1291, 1292, 1293, 1296, 1298, 1299, 1300, 1301, 1303, 1307, 1308, 1310, 1311, 1312, 1313, 1317, 1318, 1320, 1321, 1322, 1324, 1325, 1326, 1327, 1328, 1329, 1330, 1331, 1332, 1337, 1340, 1341, 1342, 1343, 1346, 1349, 1350, 1358, 1359, 3516, 1363, 1364, 1365, 1366, 1367, 1368, 3583, 1375, 1377, 1382, 1386, 1387, 3057, 1389, 1390, 1391, 1392, 1393, 1394, 1395, 1396, 1397, 1398, 1399, 1400, 1401, 1402, 1403, 1404, 1405, 1406, 1407, 1408, 1409, 1410, 1411, 1412, 1413, 1414, 2984, 1419, 1420, 1421, 1422, 1423, 1424, 1425, 1426, 1427, 1428, 1429, 1430, 1431, 1432, 1433, 1434, 1435, 3101, 3594, 1438, 1440, 1441, 1442, 1443, 1444, 1445, 1446, 1447, 1448, 1449, 1450, 1451, 1452, 1453, 1454, 1455, 1456, 1457, 1458, 1459, 1460, 1461, 1462, 1463, 1464, 1465, 1466, 1467, 1468, 1469, 1470, 1471, 3596, 1475, 1476, 1477, 1479, 1480, 1481, 1482, 1483, 1484, 1485, 1486, 1487, 1488, 1489, 1490, 1491, 1492, 1495, 1496, 3741, 1498, 1499, 1500, 3753, 3759, 1503, 1504, 1505, 1506, 1507, 1509, 1510, 1511, 1512, 1513, 1514, 1515, 1516, 1517, 1518, 1525, 1527, 1528, 1529, 1530, 1531, 1532, 1533, 1534, 1535, 1536, 1537, 1538, 1539, 1540, 1541, 1542, 1543, 1544, 1545, 1546, 1547, 1548, 1549, 1550, 1551, 1552, 1553, 1554, 1555, 1556, 1557, 1558, 1559, 1560, 1561, 1562, 1563, 1564, 1565, 1566, 1567, 1568, 1569, 1570, 1571, 1572, 1573, 1575, 1576, 1577, 1578, 1580, 1581, 1582, 1583, 1584, 1587, 1588, 1589, 1590, 1591, 1592, 1593, 1594, 1596, 1597, 1598, 1599, 1600, 1601, 1602, 1603, 1604, 1605, 1606, 1607, 1608, 1609, 1610, 1611, 1612, 1613, 1614, 1615, 1616, 1617, 1618, 1619, 1620, 1621, 1622, 1623, 1624, 1625, 1626, 1627, 1629, 1630, 1631, 1632, 1633, 1634, 1635, 1636, 3060, 1638, 1639, 1640, 1641, 1642, 1643, 1644, 1645, 1646, 1647, 1648, 1649, 1650, 1652, 1653, 1654, 1655, 1656, 1657, 1658, 1663, 1664, 1665, 1666, 1667, 1668, 1669, 1670, 3470, 1672, 1673, 1674, 1675, 3471, 1677, 1678, 1679, 1680, 1681, 1682, 1683, 1684, 1685, 1686, 1687, 1688, 2993, 1694, 1696, 1698, 1700, 1704, 1708, 1714, 1716, 1717, 1718, 1720, 1721, 1722, 1723, 1724, 1725, 1727, 1729, 1730, 1731, 1732, 1733, 1735, 1736, 3765, 1738, 1739, 1740, 1741, 1742, 1743, 1744, 1746, 1747, 1749, 1750, 1751, 1752, 1753, 1754, 1755, 1756, 1757, 1758, 1759, 1760, 1761, 1762, 1763, 1764, 1767, 1768, 1769, 1770, 1771, 1772, 1773, 1774, 1775, 1776, 1777, 1778, 1779, 1780, 1781, 1782, 1783, 1784, 1785, 1786, 1787, 1788, 1789, 1790, 1791, 1792, 1793, 1794, 1795, 1796, 1797, 1798, 1799, 1800, 1801, 1802, 1803, 1804, 1805, 1806, 1807, 1808, 1809, 1810, 1811, 1812, 1813, 1814, 1815, 1816, 1817, 1818, 1819, 1820, 1821, 1822, 1823, 1824, 1825, 1826, 1828, 1829, 3036, 1838, 1840, 1844, 3018, 1846, 1847, 3019, 1849, 1850, 1854, 3083, 1856, 1857, 1858, 1859, 1860, 1861, 1862, 1863, 1864, 1866, 1871, 1873, 1874, 1875, 1876, 1877, 1878, 3098, 1880, 1881, 1884, 1885, 1895, 1896, 1900, 1901, 1902, 1903, 1904, 1905, 1906, 1907, 1909, 1910, 1911, 1912, 1913, 1914, 1915, 1916, 1917, 1918, 1919, 1920, 1921, 1922, 1923, 1924, 1929, 1930, 1931, 1932, 1933, 1934, 1935, 1936, 1937, 1938, 1939, 1940, 1941, 1942, 1944, 1945, 1947, 1948, 1958, 1960, 1961, 1964, 1965, 1968, 1969, 1970, 1972, 1973, 1974, 1975, 1976, 1977, 1978, 1979, 1980, 1981, 1982, 1983, 1984, 1985, 1986, 1987, 1988, 1990, 1996, 1997, 1998, 1999, 2003, 3159, 2009, 2010, 2012, 2013, 2014, 2015, 3811, 3812, 2024, 2026, 2027, 2028, 2030, 2031, 2032, 2033, 2034, 2035, 2036, 2037, 2038, 2041, 2042, 2044, 2045, 2048, 2049, 3144, 3145, 3146, 2057, 3372, 2059, 2061, 2062, 2063, 2064, 2065, 2066, 2067, 2068, 2069, 2070, 2071, 2072, 2073, 2076, 2077, 2078, 2079, 2080, 2081, 2085, 2086, 2087, 2088, 2089, 2090, 2091, 2092, 2093, 2094, 2095, 2096, 2097, 2098, 2099, 2100, 2101, 2102, 2104, 2105, 2106, 2107, 2108, 2109, 2110, 2111, 2112, 2114, 2120, 2121, 2122, 2123, 2124, 2125, 2126, 2127, 2129, 2130, 2131, 3086, 2135, 2136, 2137, 2139, 2141, 2142, 2143, 2144, 3009, 3134, 3135, 3136, 3137, 3138, 2151, 2152, 2153, 2155, 3011, 3012, 3002, 3001, 2161, 3003, 2163, 3007, 2165, 3370, 2170, 2174, 2176, 2177, 2178, 2179, 2180, 2181, 2182, 2183, 2184, 2185, 2186, 3037, 2190, 2191, 2192, 2193, 3070, 2195, 2196, 2197, 2198, 2199, 2200, 2201, 2202, 2203, 2206, 3383, 2208, 2209, 2210, 2211, 3052, 2213, 2214, 2215, 2216, 3000, 2218, 3115, 2221, 2225, 2226, 3660, 2228, 2229, 3747, 3748, 2233, 3197, 2236, 3736, 2239, 2240, 2241, 2242, 2243, 3796, 2245, 3167, 2247, 3166, 2249, 2251, 2253, 2254, 2255, 2259, 2262, 2264, 2266, 2267, 2268, 2269, 2270, 2271, 2272, 2273, 2274, 2275, 2276, 2277, 2278, 2279, 2281, 2282, 2283, 3754, 2285, 2286, 2288, 3044, 3042, 3046, 2294, 2296, 2297, 2303, 2304, 2305, 2306, 3082, 2311, 2312, 2314, 2319, 2320, 3026, 3595, 2989, 2988, 2991, 3111, 3114, 2333, 2334, 2336, 2337, 2338, 2339, 2340, 2341, 2342, 2343, 2345, 2346, 2347, 2348, 2349, 2350, 2351, 2352, 2353, 3815, 2357, 2358, 2359, 2360, 2361, 2362, 2363, 2364, 2365, 2366, 2367, 2368, 2369, 2370, 2371, 2376, 2378, 2379, 2380, 2384, 2385, 2388, 2389, 2396, 2397, 2398, 2399, 2400, 2401, 2402, 2403, 2404, 2405, 2406, 2407, 2408, 2410, 2411, 2412, 2413, 2414, 2415, 2437, 2438, 2441, 2442, 2443, 2444, 2445, 2446, 2447, 2457, 2461, 2462, 2463, 2464, 2465, 2466, 2467, 2468, 2469, 2471, 2472, 2473, 2474, 2476, 2477, 2478, 2480, 2483, 2484, 2485, 2488, 2489, 2490, 2491, 2492, 2493, 2494, 2495, 2501, 2502, 2503, 2504, 2505, 2506, 2507, 2508, 2509, 2510, 2511, 2512, 2513, 2514, 2515, 2516, 2517, 2518, 2519, 2520, 2521, 2522, 2523, 2525, 2526, 2527, 2528, 2529, 2530, 2531, 2532, 2533, 2534, 2535, 2536, 2537, 2538, 2539, 2540, 2541, 2542, 2543, 2544, 2545, 2546, 2548, 2549, 2550, 2551, 3148, 2553, 2555, 2556, 2558, 2559, 2560, 2561, 2562, 2563, 2564, 2567, 2568, 2569, 2570, 2573, 2574, 2575, 2576, 2577, 2578, 2579, 2580, 2581, 2589, 2590, 2591, 2592, 2595, 2596, 2597, 2598, 2599, 2600, 2601, 2602, 2603, 2605, 2606, 2607, 2608, 2609, 2610, 2611, 2612, 2613, 2616, 2618, 2619, 2622, 2623, 2624, 2625, 2626, 2627, 2628, 2629, 2630, 2632, 2633, 2635, 2636, 2637, 2638, 2639, 2640, 2641, 2642, 2643, 2644, 2645, 2647, 2649, 2652, 2654, 3744, 2659, 2660, 2661, 2662, 2663, 2664, 2665, 2669, 2670, 2672, 2673, 2674, 2675, 2676, 2677, 2678, 2680, 2681, 2682, 2687, 2688, 2689, 2691, 2692, 2693, 2694, 2696, 2697, 2698, 2699, 2700, 2701, 2702, 2703, 2704, 2705, 2706, 2707, 2708, 3717, 2710, 2711, 2713, 3714, 2715, 2716, 3718, 3715, 2728, 2732, 3725, 3221, 3726, 2736, 3727, 2738, 2740, 3729, 2742, 3730, 2744, 2746, 3734, 3712, 3705, 3713, 2765, 2766, 2768, 2769, 2779, 2780, 2782, 2783, 2784, 2785, 2786, 2787, 2788, 2789, 2790, 2794, 2797, 2800, 2802, 2804, 2810, 2811, 2812, 2813, 2814, 2815, 2816, 2817, 2818, 2819, 2820, 2821, 2822, 3392, 2824, 2825, 2826, 2827, 2828, 2830, 2832, 2833, 3424, 2839, 2840, 2841, 2842, 2843, 2844, 2845, 2846, 2847, 2848, 2849, 2850, 2852, 2853, 2854, 2855, 2858, 2859, 2861, 2862, 2863, 2864, 3016, 2866, 2868, 2869, 2871, 2872, 2873, 2874, 2875, 2877, 2878, 2882, 2885, 2886, 2887, 2889, 2890, 2891, 2893, 2894, 2895, 2896, 2898, 2899, 2902, 2905, 2906, 2907, 2908, 2909, 2911, 2913, 2914, 2916, 2917, 2918, 2919, 2920, 2921, 2922, 2923, 2925, 2926, 2927, 2928, 2929, 2930, 2931, 2932, 2933, 2934, 2935, 2936, 2937, 2938, 2939, 2940, 2941, 2942, 2943, 2944, 2950, 2951, 2952, 2954, 2955, 2956, 2960, 2961, 2962, 2963, 2964, 2968, 2969, 2973, 2974, 2975, 2976, 2977, 2978, 2980, 2985, 2986, 2992, 2997, 2999, 3004, 3005, 3006, 3008, 3010, 3013, 3014, 3015, 3017, 3021, 3028, 3029, 3030, 3031, 3032, 3033, 3034, 3035, 3038, 3039, 3040, 3041, 3045, 3047, 3048, 3049, 3050, 3054, 3055, 3059, 3061, 3062, 3063, 3065, 3066, 3067, 3068, 3069, 3072, 3073, 3074, 3075, 3076, 3077, 3078, 3079, 3080, 3087, 3088, 3089, 3090, 3095, 3096, 3097, 3099, 3103, 3104, 3105, 3106, 3107, 3110, 3112, 3113, 3116, 3117, 3118, 3119, 3120, 3121, 3122, 3123, 3124, 3126, 3128, 3129, 3130, 3131, 3132, 3133, 3139, 3140, 3141, 3142, 3143, 3147, 3149, 3150, 3151, 3152, 3153, 3154, 3155, 3157, 3158, 3161, 3163, 3164, 3165, 3168, 3173, 3174, 3175, 3177, 3180, 3182, 3183, 3185, 3186, 3187, 3189, 3190, 3191, 3193, 3194, 3195, 3196, 3200, 3205, 3210, 3211, 3212, 3213, 3214, 3215, 3216, 3218, 3223, 3224, 3225, 3226, 3227, 3228, 3229, 3230, 3231, 3232, 3233, 3234, 3235, 3238, 3239, 3242, 3243, 3244, 3245, 3246, 3247, 3248, 3249, 3252, 3253, 3254, 3255, 3256, 3257, 3258, 3259, 3260, 3261, 3262, 3265, 3266, 3268, 3269, 3270, 3271, 3272, 3273, 3274, 3275, 3276, 3277, 3278, 3279, 3280, 3281, 3282, 3283, 3284, 3285, 3286, 3287, 3288, 3289, 3290, 3291, 3292, 3293, 3294, 3297, 3298, 3299, 3300, 3301, 3302, 3303, 3304, 3305, 3306, 3308, 3309, 3310, 3311, 3312, 3313, 3314, 3315, 3316, 3317, 3318, 3319, 3320, 3321, 3322, 3323, 3324, 3325, 3326, 3327, 3328, 3329, 3330, 3331, 3332, 3333, 3334, 3335, 3336, 3337, 3338, 3339, 3340, 3343, 3344, 3345, 3346, 3347, 3348, 3349, 3350, 3351, 3352, 3353, 3354, 3355, 3356, 3357, 3358, 3359, 3360, 3361, 3362, 3363, 3364, 3366, 3367, 3371, 3373, 3374, 3375, 3377, 3378, 3379, 3382, 3384, 3385, 3386, 3387, 3388, 3391, 3393, 3396, 3398, 3399, 3404, 3405, 3406, 3407, 3410, 3417, 3418, 3419, 3420, 3421, 3422, 3425, 3426, 3427, 3428, 3431, 3432, 3433, 3434, 3435, 3436, 3437, 3438, 3439, 3440, 3442, 3443, 3444, 3445, 3446, 3447, 3449, 3450, 3452, 3453, 3454, 3455, 3456, 3462, 3463, 3464, 3465, 3466, 3467, 3468, 3469, 3472, 3475, 3478, 3479, 3480, 3481, 3482, 3483, 3484, 3485, 3486, 3487, 3488, 3489, 3490, 3491, 3492, 3493, 3494, 3495, 3496, 3498, 3499, 3500, 3501, 3502, 3503, 3504, 3506, 3507, 3508, 3509, 3510, 3511, 3512, 3513, 3515, 3520, 3526, 3528, 3529, 3530, 3531, 3532, 3533, 3534, 3535, 3536, 3537, 3538, 3539, 3540, 3541, 3542, 3544, 3545, 3546, 3547, 3548, 3549, 3553, 3554, 3558, 3559, 3565, 3566, 3567, 3568, 3569, 3570, 3571, 3572, 3573, 3575, 3576, 3577, 3578, 3581, 3582, 3584, 3585, 3598, 3599, 3600, 3601, 3602, 3603, 3604, 3605, 3606, 3607, 3608, 3609, 3610, 3611, 3612, 3613, 3614, 3616, 3617, 3618, 3622, 3623, 3624, 3625, 3631, 3632, 3633, 3634, 3638, 3640, 3641, 3642, 3644, 3647, 3648, 3652, 3659, 3661, 3664, 3666, 3667, 3668, 3669, 3670, 3671, 3673, 3674, 3675, 3676, 3677, 3678, 3679, 3680, 3681, 3682, 3683, 3684, 3685, 3686, 3687, 3688, 3689, 3690, 3691, 3692, 3693, 3694, 3695, 3696, 3697, 3698, 3699, 3700, 3701, 3702, 3703, 3704, 3722, 3737, 3740, 3742, 3743, 3745, 3749, 3751, 3755, 3764, 3767, 3768, 3769, 3770, 3771, 3772, 3774, 3780, 3781, 3784, 3787, 3789, 3790, 3791, 3792, 3793, 3794, 3797, 3800, 3802, 3806, 3807, 3808, 3809, 3810, 3813, 3814, 3816, 3817, 3819, 3820, 3821, 3822, 3823, 3824, 3825, 3826, 3828, 3829, 3830, 3831, 3832, 3833, 3834, 3835, 3836, 3837, 3838, 3839, 3840, 3841, 3842, 3843, 3844, 3845, 3848, 3850, 3852, 3856, 3857, 3858, 3859, 3860, 3861, 3869, 3870, 3872, 3873, 3882, 3888, 3894, 3903, 3905, 3906, 3907, 3908, 3911, 3912, 3914, 3920, 3928, 3933, 3934, 3936, 3937, 3938, 3940, 3941, 3942, 3947, 3948, 3949, 3950, 3951, 3952, 3953, 3954, 3955, 3958, 3959, 3960, 4005, 4006, 4011, 4013, 4014, 4016, 4022, 4025, 4040, 4041, 4042, 4043, 4044, 4045, 4047, 4048, 4050, 4051, 4053, 4055, 4056, 4069, 4072, 4073, 4075, 4076, 4080, 4085, 4088, 4089, 4091, 4092, 4098, 4100, 4101, 4104, 4106, 4111, 4112, 4113, 4118, 4129, 4152, 4168, 4176, 4185, 4186, 4190, 4195, 4211, 4212, 4213, 4214, 4216, 4218, 4219, 4221, 4224, 4228, 4231, 4234, 4235, 4236, 4237, 4241, 4242, 4243, 4244, 4247, 4248, 4249, 4250, 4251, 4252, 4253, 4254, 4255, 4256, 4257, 4258, 4259, 4260, 4261, 4262, 4263, 4264, 4265, 4266, 4267, 4268, 4269, 4270, 4278, 4281, 4282, 4288, 4293, 4294, 4295, 4296, 4300, 4304, 4306, 4307, 4308, 4309, 4310, 4311, 4312, 4313, 4315, 4316, 4317, 4318, 4320, 4321, 4322, 4323, 4324, 4325, 4326, 4336, 4345, 4346, 4347, 4348, 4349, 4350, 4351, 4352, 4353, 4354, 4356, 4357, 4358, 4359, 4360, 4361, 4362, 4363, 4364, 4365, 4366, 4367, 4368, 4369, 4370, 4374, 4375, 4377, 4378, 4379, 4380, 4384, 4385, 4386, 4387, 4388, 4389, 4391, 4392, 4393, 4400, 4401, 4402, 4403, 4404, 4405, 4409, 4413, 4414, 4416, 4417, 4418, 4419, 4420, 4422, 4432, 4434, 4439, 4440, 4441, 4442, 4443, 4444, 4445, 4446, 4447, 4448, 4449, 4450, 4451, 4452, 4453, 4454, 4456, 4457, 4458, 4459, 4460, 4461, 4462, 4467, 4470, 4471, 4472, 4473, 4474, 4475, 4476, 4477, 4478, 4479, 4480, 4481, 4482, 4483, 4484, 4485, 4486, 4487, 4488, 4489, 4490, 4492, 4493, 4494, 4496, 4497, 4498, 4499, 4502, 4503, 4504, 4506, 4507, 4508, 4510, 4511, 4512, 4513, 4514, 4515, 4517, 4519, 4522, 4523, 4524, 4525, 4527, 4528, 4529, 4530, 4531, 4532, 4533, 4534, 4535, 4536, 4537, 4541, 4543, 4544, 4545, 4546, 4547, 4551, 4552, 4556, 4557, 4558, 4560, 4562, 4563, 4564, 4565, 4566, 4567, 4568, 4570, 4571, 4572, 4573, 4574, 4575, 4576, 4583, 4584, 4585, 4586, 4587, 4588, 4589, 4590, 4591, 4592, 4593, 4594, 4600, 4601, 4603, 4604, 4605, 4606, 4607, 4608, 4609, 4610, 4611, 4612, 4613, 4614, 4615, 4616, 4617, 4618, 4622, 4623, 4624, 4625, 4626, 4627, 4628, 4629, 4630, 4635, 4636, 4641, 4642, 4643, 4644, 4645, 4646, 4647, 4648, 4649, 4650, 4651, 4652, 4653, 4654, 4656, 4657, 4658, 4659, 4668, 4669, 4670, 4671, 4672, 4673, 4675, 4678, 4679, 4680, 4682, 4683, 4684, 4685, 4686, 4687, 4688, 4689, 4690, 4691, 4692, 4693, 4694, 4695, 4696, 4697, 4698, 4699, 4700, 4701, 4702, 4703, 4704, 4705, 4706, 4707, 4708, 4709, 4710, 4711, 4712, 4713, 4714, 4715, 4716, 4717, 4718, 4719, 4720, 4721, 4722, 4723, 4724, 4725, 4726, 4727, 4728, 4729, 4730, 4731, 4732, 4733, 4734, 4735, 4736, 4737, 4738, 4739, 4740, 4741, 4742, 4743, 4744, 4745, 4746, 4747, 4748, 4749, 4750, 4751, 4752, 4753, 4754, 4755, 4756, 4757, 4758, 4759, 4760, 4761, 4762, 4763, 4764, 4765, 4766, 4767, 4768, 4769, 4770, 4771, 4772, 4773, 4774, 4775, 4776, 4777, 4778, 4779, 4780, 4781, 4782, 4783, 4788, 4789, 4790, 4796, 4809, 4813, 4814, 4815, 4816, 4817, 4818, 4819, 4820, 4821, 4822, 4823, 4824, 4825, 4826, 4827, 4828, 4830, 4831, 4832, 4833, 4834, 4836, 4837, 4838, 4839, 4840, 4841, 4842, 4845, 4846, 4848, 4849, 4850, 4853, 4854, 4855, 4856, 4857, 4858, 4859, 4860, 4861, 4862, 4863, 4864, 4865, 4866, 4867, 4868, 4869, 4870, 4871, 4872, 4873, 4874, 4875, 4876, 4877, 4878, 4879, 4881, 4882, 4883, 4884, 4885, 4886, 4887, 4888, 4889, 4890, 4891, 4892, 4893, 4894, 4895, 4896, 4897, 4898, 4899, 4900, 4901, 4902, 4903, 4904, 4905, 4906, 4907, 4908, 4909, 4910, 4911, 4912, 4914, 4915, 4916, 4918, 4920, 4922, 4923, 4924, 4925, 4928, 4930, 4931, 4932, 4933, 4935, 4936, 4937, 4938, 4939, 4940, 4941, 4942, 4945, 4949, 4950, 4954, 4955, 4956, 4957, 4958, 4960, 4961, 4964, 4965, 4966, 4967, 4968, 4970, 4971, 4972, 4973, 4975, 4977, 4978, 4981, 4982, 4983, 4984, 4985, 4986, 4987, 4988, 4989, 4990, 4991, 4992, 4993, 4994, 4995, 4996, 4997, 4998, 4999, 5000, 5001, 5002, 5003, 5004, 5005, 5006, 5007, 5008, 5009, 5010, 5011, 5016, 5019, 5021, 5022, 5023, 5024, 5028, 5029, 5030, 5031, 5032, 5034, 5036, 5039, 5041, 5045, 5046, 5047, 5048, 5049, 5050, 5051, 5052, 5053, 5054, 5055, 5056, 5057, 5058, 5059, 5060) }
-  internal val templates: IntArray by lazy { intArrayOf(2377, 2856, 2668, 2667, 2666, 2888, 2910, 3390, 2631, 420, 2801, 2799, 2695, 2386, 2392, 2803, 5025, 2900, 2615, 2614, 286, 2344, 2805, 2912, 3240, 4200, 2554, 4959, 2604, 2052, 2382, 3724, 2117, 2731, 5026, 2387, 5013, 5018, 3241, 1338, 4220, 4240, 3723, 2572, 2729, 1869, 4215, 2128, 2169, 2175, 4596, 284, 2118, 4538, 3402, 3423, 2075, 2355, 3720, 454, 2763, 2795, 2796, 3403, 3719, 2764, 3651, 611, 1713, 3728, 1870, 2739, 3731, 2745, 3394, 618, 619, 2781, 3092, 3706, 1661, 2798, 3650, 304, 616, 70, 713, 623, 2354, 4238, 1123, 2496, 3473, 3846, 1244, 2204, 2583, 3395, 2167, 3735, 716, 1765, 1966, 2751, 2760, 2971, 4245, 3397, 3409, 137, 596, 598, 2571, 2726, 1867, 4233, 3043, 612, 2291, 2594, 3891, 5037, 1304, 4232, 5017, 3519, 3656, 3657, 159, 2082, 2084, 2119, 2851, 4394, 2173, 2381, 2524, 5012, 3645, 215, 285, 1278, 2016, 4829, 3514, 3523, 3524, 68, 84, 219, 621, 4632, 3543, 1362, 4327, 3368, 3733, 728, 1025, 1374, 2395, 2487, 2749, 4397, 90, 2394, 2409, 2924, 626, 1659, 1956, 2838, 4526, 3416, 1579, 2103, 2295, 2585, 4578, 3411, 3477, 3527, 652, 1890, 3946, 3176, 3518, 3564, 3628, 3847, 1319, 1868, 2047, 2433, 2720, 3874, 4597, 3430, 3476, 1843, 1865, 3365, 595, 1294, 1348, 1373, 1955, 3505, 3707, 222, 1703, 2752, 2949, 3094, 3162, 3451, 259, 593, 1028, 1381, 1967, 1991, 4153, 3448, 3574, 657, 1344, 1719, 2053, 3170, 3369, 3630, 3649, 712, 1285, 1372, 1384, 1660, 1734, 1897, 2383, 2486, 2584, 3961, 4239, 4463, 3429, 3497, 3643, 651, 701, 1046, 2620, 5038, 3188, 3307, 3710, 109, 185, 608, 723, 1083, 1971, 2051, 2113, 2171, 2419, 2500, 2756, 2792, 2836, 3966, 4509, 4852, 3389, 3460, 3621, 161, 625, 703, 1334, 1335, 1347, 1522, 1662, 2168, 2172, 2265, 2418, 2646, 4208, 4539, 3125, 3217, 3264, 3342, 3556, 3711, 3721, 705, 1185, 1574, 1899, 2260, 2263, 2499, 2757, 2777, 2778, 2946, 2947, 3976, 3996, 4229, 4500, 4835, 4851, 5014, 5020, 3629, 3646, 3752, 1380, 1494, 1586, 1705, 1957, 2439, 2451, 2776, 4172, 4230, 4540, 4631, 3091, 3093, 3108, 3626, 3639, 3805, 725, 1026, 1834, 2140, 2205, 2429, 2772, 2773, 3981, 4227, 4303, 4314, 3295, 3415, 92, 94, 597, 717, 1029, 1352, 1357, 2022, 2335, 2434, 2719, 2771, 2775, 3943, 4579, 4913, 3022, 3023, 3525, 3589, 3732, 95, 1253, 1261, 1355, 1379, 1521, 1585, 1882, 2188, 2220, 2479, 2497, 2747, 3883, 3884, 4226, 4406, 4469, 4917, 5042, 3341, 3380, 3381, 3459, 3615, 300, 601, 620, 702, 1111, 1119, 1177, 1369, 1520, 1628, 1950, 2132, 2138, 2156, 2223, 2449, 2454, 2456, 2679, 2712, 2770, 2948, 2965, 2966, 4197, 4223, 4340, 5015, 5027, 3024, 3178, 3555, 3588, 3757, 212, 587, 592, 607, 719, 722, 908, 992, 1086, 1161, 1336, 1472, 1526, 1707, 1888, 1908, 1928, 1963, 1993, 2074, 2318, 2432, 2498, 2953, 3910, 3962, 4180, 4580, 4598, 4599, 4800, 4962, 3085, 3441, 3636, 3637, 93, 97, 270, 605, 650, 714, 982, 1333, 1709, 1889, 1946, 2116, 2427, 2453, 2455, 2458, 2547, 2685, 2721, 2903, 2915, 4271, 4582, 4812, 2998, 3263, 3296, 3376, 3474, 3593, 3627, 209, 278, 317, 330, 331, 1289, 1354, 1378, 1523, 1524, 1951, 2021, 2046, 2115, 2222, 2250, 2301, 2421, 2436, 2448, 2722, 2725, 2806, 2807, 3881, 4595, 4795, 4969, 3020, 3408, 3412, 3461, 3517, 3672, 3709, 3762, 6, 245, 305, 602, 606, 1049, 1223, 1288, 1356, 1361, 1710, 1711, 1886, 1959, 1962, 2020, 2023, 2154, 2189, 2237, 2420, 2428, 2648, 2754, 2793, 2870, 3878, 3879, 3939, 4196, 4798, 4810, 4811, 4980, 3458, 3580, 3587, 3592, 3654, 3662, 269, 319, 323, 332, 585, 709, 724, 1078, 1162, 1166, 1286, 1287, 1314, 1519, 1712, 1830, 1891, 2011, 2224, 2230, 2391, 2417, 2423, 2450, 2582, 2683, 3944, 4169, 4222, 4285, 4398, 4468, 4681, 4799, 4974, 3071, 3156, 3521, 3522, 3620, 3653, 66, 211, 275, 589, 610, 615, 710, 715, 986, 1077, 1169, 1371, 1715, 1745, 1831, 1836, 1851, 1887, 2050, 2083, 2280, 2298, 2307, 2416, 2470, 2482, 2774, 4207, 3051, 3401, 3586, 3655, 3663, 3708, 91, 208, 289, 321, 324, 325, 350, 599, 609, 711, 857, 907, 1168, 1171, 1254, 1439, 1892, 2007, 2017, 2422, 2431, 2475, 2753, 2791, 2945, 2959, 3916, 4843, 4844, 4847, 4943, 3025, 3056, 3109, 3179, 3237, 3250, 3251, 3414, 3562, 3563, 3635, 3658, 3665, 3716, 111, 187, 191, 192, 213, 322, 328, 329, 353, 376, 582, 584, 591, 627, 729, 853, 979, 1079, 1120, 1149, 1245, 1306, 1316, 1748, 1832, 1833, 1841, 1952, 1953, 1954, 2043, 2256, 2258, 2287, 2299, 2300, 2322, 2390, 2424, 2425, 2481, 2587, 2588, 2671, 2686, 2718, 2723, 2724, 2761, 2808, 2809, 3862, 3880, 3926, 3980, 4225, 4319, 4337, 4355, 4395, 4466, 4501, 4553, 4577, 4638, 4639, 4880, 4963, 4979, 5040, 5044, 3058, 3160, 3184, 3198, 3219, 3400, 3413, 3557, 3561, 3591, 3619, 3750, 3760, 3761, 3773, 3775, 3782, 5, 8, 83, 186, 189, 193, 258, 277, 326, 327, 349, 352, 357, 600, 622, 660, 698, 707, 858, 987, 1050, 1124, 1150, 1151, 1170, 1181, 1241, 1385, 1493, 1651, 1695, 1706, 1852, 1883, 1949, 1995, 2008, 2029, 2252, 2257, 2310, 2316, 2317, 2324, 2435, 2621, 2657, 2831, 3927, 3935, 3965, 3982, 4149, 4184, 4198, 4246, 4286, 4338, 4390, 4554, 4581, 4976, 3081, 3127, 3203, 3204, 3209, 3267, 3551, 3854, 155, 260, 262, 348, 351, 354, 581, 604, 614, 704, 708, 984, 1080, 1383, 1595, 1835, 1927, 1989, 1992, 2308, 2321, 2393, 2440, 2586, 2634, 2876, 3885, 3932, 3998, 4165, 4550, 4637, 4640, 5035, 3457, 3550, 3552, 3560, 3579, 3590, 3758, 3779, 3799, 3855, 96, 197, 204, 205, 206, 243, 244, 347, 583, 588, 603, 617, 624, 628, 629, 693, 718, 727, 985, 988, 1087, 1091, 1163, 1176, 1206, 1351, 1473, 1508, 1690, 1691, 1693, 1728, 1853, 1893, 2235, 2313, 2323, 2430, 2452, 2460, 2967, 4151, 4181, 4182, 4272, 4297, 4335, 4396, 4464, 4520, 4561, 4919, 4944) }
-  internal val argNames: Map<Int, Array<String>> by lazy { mapOf(5 to arrayOf("n"), 6 to arrayOf("n"), 7 to arrayOf("who"), 8 to arrayOf("title"), 66 to arrayOf("state"), 68 to arrayOf("listen"), 70 to arrayOf("listen"), 83 to arrayOf("version"), 84 to arrayOf("count", "plural"), 90 to arrayOf("size", "limit"), 91 to arrayOf("name"), 92 to arrayOf("dir"), 93 to arrayOf("dir"), 94 to arrayOf("name"), 95 to arrayOf("name"), 96 to arrayOf("path"), 97 to arrayOf("path"), 98 to arrayOf("name"), 109 to arrayOf("first"), 111 to arrayOf("n"), 137 to arrayOf("count", "plural"), 155 to arrayOf("tool"), 159 to arrayOf("n"), 161 to arrayOf("name"), 185 to arrayOf("pid", "cmd"), 186 to arrayOf("title", "ago"), 187 to arrayOf("name", "who", "n"), 189 to arrayOf("line"), 191 to arrayOf("n"), 192 to arrayOf("n"), 193 to arrayOf("n"), 197 to arrayOf("name"), 204 to arrayOf("when"), 205 to arrayOf("text", "when"), 206 to arrayOf("when"), 208 to arrayOf("count", "plural"), 209 to arrayOf("count", "plural"), 211 to arrayOf("took", "ago"), 212 to arrayOf("ago"), 213 to arrayOf("kind"), 215 to arrayOf("kind", "code", "why"), 219 to arrayOf("clock"), 222 to arrayOf("build"), 243 to arrayOf("step"), 244 to arrayOf("turn"), 245 to arrayOf("branch"), 258 to arrayOf("step", "total"), 259 to arrayOf("step", "total"), 260 to arrayOf("when"), 262 to arrayOf("tool"), 269 to arrayOf("count", "plural"), 270 to arrayOf("count", "total"), 275 to arrayOf("old", "new"), 277 to arrayOf("version"), 278 to arrayOf("count"), 279 to arrayOf("tag"), 284 to arrayOf("version"), 285 to arrayOf("old", "version"), 286 to arrayOf("version"), 289 to arrayOf("version"), 300 to arrayOf("project", "location"), 304 to arrayOf("account"), 305 to arrayOf("account"), 317 to arrayOf("n"), 319 to arrayOf("n"), 321 to arrayOf("minute"), 322 to arrayOf("time"), 323 to arrayOf("time"), 324 to arrayOf("clock"), 325 to arrayOf("clock", "took"), 326 to arrayOf("clock"), 327 to arrayOf("clock", "took"), 328 to arrayOf("clock"), 329 to arrayOf("clock", "took"), 330 to arrayOf("clock"), 331 to arrayOf("clock", "took"), 332 to arrayOf("clock"), 347 to arrayOf("target"), 348 to arrayOf("target"), 349 to arrayOf("target"), 350 to arrayOf("target"), 351 to arrayOf("target"), 352 to arrayOf("target"), 353 to arrayOf("target"), 354 to arrayOf("target"), 357 to arrayOf("name"), 376 to arrayOf("t"), 420 to arrayOf("minutes", "plural"), 454 to arrayOf("path"), 581 to arrayOf("count"), 582 to arrayOf("count"), 583 to arrayOf("title"), 584 to arrayOf("path"), 585 to arrayOf("path", "error"), 586 to arrayOf("first", "last", "count"), 587 to arrayOf("task", "step"), 588 to arrayOf("count"), 589 to arrayOf("path"), 590 to arrayOf("count", "plural"), 591 to arrayOf("label"), 592 to arrayOf("provider"), 593 to arrayOf("version"), 595 to arrayOf("key"), 596 to arrayOf("device"), 597 to arrayOf("kind", "device"), 598 to arrayOf("status"), 599 to arrayOf("kind", "title"), 600 to arrayOf("layer"), 601 to arrayOf("error"), 602 to arrayOf("page"), 603 to arrayOf("page", "kind", "total"), 604 to arrayOf("reason"), 605 to arrayOf("tag"), 606 to arrayOf("tag"), 607 to arrayOf("title"), 608 to arrayOf("title"), 609 to arrayOf("text", "time"), 610 to arrayOf("kind", "device"), 611 to arrayOf("device"), 612 to arrayOf("device"), 613 to arrayOf("word"), 614 to arrayOf("word", "kind", "count"), 615 to arrayOf("error"), 616 to arrayOf("count"), 617 to arrayOf("time", "relative", "rel", "zoned", "zone"), 618 to arrayOf("zone"), 619 to arrayOf("zone"), 620 to arrayOf("id", "state", "count", "age"), 621 to arrayOf("id"), 622 to arrayOf("name"), 623 to arrayOf("name"), 624 to arrayOf("clock", "count", "plural"), 625 to arrayOf("name"), 626 to arrayOf("name"), 627 to arrayOf("name"), 628 to arrayOf("count"), 629 to arrayOf("count"), 633 to arrayOf("name", "state"), 634 to arrayOf("author", "place", "state"), 635 to arrayOf("title", "state"), 650 to arrayOf("error"), 651 to arrayOf("error"), 652 to arrayOf("host"), 657 to arrayOf("email"), 660 to arrayOf("version"), 662 to arrayOf("first", "last", "count"), 663 to arrayOf("n"), 664 to arrayOf("n"), 693 to arrayOf("ref"), 698 to arrayOf("name"), 699 to arrayOf("name"), 701 to arrayOf("name"), 702 to arrayOf("name"), 703 to arrayOf("action"), 704 to arrayOf("label"), 705 to arrayOf("count", "plural"), 707 to arrayOf("path"), 708 to arrayOf("word", "kind", "count"), 709 to arrayOf("name"), 710 to arrayOf("name"), 711 to arrayOf("name"), 712 to arrayOf("name"), 713 to arrayOf("url"), 714 to arrayOf("count"), 715 to arrayOf("count"), 716 to arrayOf("device"), 717 to arrayOf("device"), 718 to arrayOf("count"), 719 to arrayOf("label"), 720 to arrayOf("label"), 721 to arrayOf("label"), 722 to arrayOf("title"), 723 to arrayOf("title"), 724 to arrayOf("state"), 725 to arrayOf("open", "kind"), 727 to arrayOf("count"), 728 to arrayOf("email"), 729 to arrayOf("email"), 853 to arrayOf("at", "count"), 857 to arrayOf("name"), 858 to arrayOf("name"), 907 to arrayOf("name"), 908 to arrayOf("name"), 979 to arrayOf("count"), 982 to arrayOf("name"), 983 to arrayOf("name", "count"), 984 to arrayOf("label", "n"), 985 to arrayOf("action"), 986 to arrayOf("count", "plural"), 987 to arrayOf("count"), 988 to arrayOf("waiting", "busy", "done"), 992 to arrayOf("count", "plural"), 1025 to arrayOf("name"), 1026 to arrayOf("name"), 1028 to arrayOf("seconds", "long"), 1029 to arrayOf("size", "triangles", "delayed", "waited", "built"), 1030 to arrayOf("size", "delayed", "waited"), 1046 to arrayOf("name"), 1049 to arrayOf("name"), 1050 to arrayOf("count"), 1077 to arrayOf("state"), 1078 to arrayOf("bytes"), 1079 to arrayOf("count"), 1080 to arrayOf("when"), 1081 to arrayOf("state", "name"), 1082 to arrayOf("name", "state"), 1083 to arrayOf("reason", "code"), 1086 to arrayOf("kind", "code"), 1087 to arrayOf("number"), 1091 to arrayOf("x", "y"), 1098 to arrayOf("state"), 1099 to arrayOf("label", "example"), 1111 to arrayOf("text"), 1119 to arrayOf("error"), 1120 to arrayOf("kind", "count"), 1123 to arrayOf("name"), 1124 to arrayOf("n"), 1149 to arrayOf("ago"), 1150 to arrayOf("name"), 1151 to arrayOf("kind", "place", "hub"), 1161 to arrayOf("label"), 1162 to arrayOf("word"), 1163 to arrayOf("count"), 1166 to arrayOf("hub"), 1168 to arrayOf("count"), 1169 to arrayOf("state"), 1170 to arrayOf("label"), 1171 to arrayOf("label"), 1176 to arrayOf("state", "text"), 1177 to arrayOf("text"), 1179 to arrayOf("question"), 1181 to arrayOf("label"), 1185 to arrayOf("title"), 1206 to arrayOf("count"), 1207 to arrayOf("name", "counts"), 1221 to arrayOf("n"), 1223 to arrayOf("mode"), 1240 to arrayOf("first", "last", "total"), 1241 to arrayOf("count"), 1244 to arrayOf("n"), 1245 to arrayOf("who", "name"), 1253 to arrayOf("name"), 1254 to arrayOf("when"), 1261 to arrayOf("why"), 1278 to arrayOf("name"), 1285 to arrayOf("kind"), 1286 to arrayOf("title"), 1287 to arrayOf("title"), 1288 to arrayOf("title"), 1289 to arrayOf("title"), 1294 to arrayOf("name"), 1304 to arrayOf("heard"), 1305 to arrayOf("out", "heard"), 1306 to arrayOf("heard"), 1314 to arrayOf("name", "mb"), 1316 to arrayOf("name"), 1319 to arrayOf("platform"), 1323 to arrayOf("heard", "out", "yes"), 1333 to arrayOf("name", "done", "total", "percent"), 1334 to arrayOf("name", "done"), 1335 to arrayOf("name"), 1336 to arrayOf("error"), 1338 to arrayOf("mb"), 1344 to arrayOf("mb"), 1347 to arrayOf("n"), 1348 to arrayOf("n"), 1351 to arrayOf("n"), 1352 to arrayOf("pct"), 1353 to arrayOf("px"), 1354 to arrayOf("version"), 1355 to arrayOf("tag"), 1356 to arrayOf("tag"), 1357 to arrayOf("hub"), 1361 to arrayOf("tag"), 1362 to arrayOf("tag"), 1369 to arrayOf("when"), 1371 to arrayOf("tag"), 1372 to arrayOf("tag", "when"), 1373 to arrayOf("tag"), 1374 to arrayOf("tag", "when"), 1378 to arrayOf("channel"), 1379 to arrayOf("tag"), 1380 to arrayOf("app", "hub"), 1381 to arrayOf("hub", "app"), 1383 to arrayOf("key"), 1384 to arrayOf("key"), 1385 to arrayOf("why"), 1439 to arrayOf("n"), 1472 to arrayOf("title"), 1473 to arrayOf("note"), 1493 to arrayOf("title"), 1494 to arrayOf("more"), 1508 to arrayOf("bots"), 1519 to arrayOf("name"), 1520 to arrayOf("name", "time"), 1521 to arrayOf("name", "n"), 1522 to arrayOf("name", "time", "n"), 1523 to arrayOf("to"), 1524 to arrayOf("to", "step"), 1526 to arrayOf("note"), 1574 to arrayOf("why"), 1579 to arrayOf("e"), 1585 to arrayOf("max"), 1586 to arrayOf("secs", "max", "mib"), 1595 to arrayOf("path"), 1628 to arrayOf("secs"), 1651 to arrayOf("pct", "scope"), 1659 to arrayOf("n"), 1660 to arrayOf("n"), 1661 to arrayOf("n"), 1662 to arrayOf("n"), 1690 to arrayOf("d", "h"), 1691 to arrayOf("h", "m"), 1692 to arrayOf("m"), 1693 to arrayOf("window", "pct"), 1695 to arrayOf("when"), 1697 to arrayOf("label", "e"), 1699 to arrayOf("from", "to", "total"), 1703 to arrayOf("messages", "lines", "left"), 1705 to arrayOf("pct", "view", "max"), 1706 to arrayOf("pct"), 1707 to arrayOf("done", "total"), 1709 to arrayOf("n"), 1710 to arrayOf("n"), 1711 to arrayOf("time"), 1712 to arrayOf("view", "max"), 1713 to arrayOf("view", "max"), 1715 to arrayOf("more"), 1719 to arrayOf("n"), 1728 to arrayOf("n"), 1734 to arrayOf("page"), 1745 to arrayOf("title"), 1748 to arrayOf("n"), 1765 to arrayOf("name"), 1830 to arrayOf("line"), 1831 to arrayOf("quote"), 1832 to arrayOf("n"), 1833 to arrayOf("n"), 1834 to arrayOf("n"), 1835 to arrayOf("n"), 1836 to arrayOf("n"), 1841 to arrayOf("held"), 1842 to arrayOf("machine"), 1843 to arrayOf("machine"), 1851 to arrayOf("count", "total"), 1852 to arrayOf("count"), 1853 to arrayOf("n"), 1865 to arrayOf("name"), 1867 to arrayOf("n", "c", "total"), 1868 to arrayOf("n", "c"), 1869 to arrayOf("n", "c", "total", "before"), 1870 to arrayOf("n", "c", "before"), 1882 to arrayOf("name"), 1883 to arrayOf("path"), 1886 to arrayOf("file"), 1887 to arrayOf("path", "n"), 1888 to arrayOf("why"), 1889 to arrayOf("n"), 1890 to arrayOf("name"), 1891 to arrayOf("name"), 1892 to arrayOf("name"), 1893 to arrayOf("n"), 1894 to arrayOf("shown", "n"), 1897 to arrayOf("path"), 1899 to arrayOf("n"), 1908 to arrayOf("status"), 1925 to arrayOf("name", "pct"), 1926 to arrayOf("name", "mb"), 1927 to arrayOf("name"), 1928 to arrayOf("name", "why"), 1946 to arrayOf("machine"), 1949 to arrayOf("n"), 1950 to arrayOf("ref"), 1951 to arrayOf("ref", "sheet"), 1952 to arrayOf("name"), 1953 to arrayOf("name"), 1954 to arrayOf("file", "folder"), 1955 to arrayOf("name", "error"), 1956 to arrayOf("name", "status"), 1957 to arrayOf("name", "error"), 1959 to arrayOf("name"), 1962 to arrayOf("code"), 1963 to arrayOf("error"), 1966 to arrayOf("error"), 1967 to arrayOf("error"), 1971 to arrayOf("error"), 1989 to arrayOf("done", "of"), 1991 to arrayOf("why"), 1992 to arrayOf("path"), 1993 to arrayOf("error"), 1994 to arrayOf("secs"), 1995 to arrayOf("secs"), 2007 to arrayOf("code"), 2008 to arrayOf("code"), 2011 to arrayOf("state"), 2016 to arrayOf("hide", "copy", "paste"), 2017 to arrayOf("n"), 2020 to arrayOf("name"), 2021 to arrayOf("name", "folder"), 2022 to arrayOf("name"), 2023 to arrayOf("name", "percent"), 2029 to arrayOf("folder"), 2039 to arrayOf("w", "h"), 2043 to arrayOf("path"), 2046 to arrayOf("why"), 2047 to arrayOf("mb"), 2050 to arrayOf("n"), 2051 to arrayOf("delete", "undo"), 2052 to arrayOf("delete", "undo"), 2053 to arrayOf("undo"), 2074 to arrayOf("what", "secs"), 2075 to arrayOf("file", "holder"), 2082 to arrayOf("what"), 2083 to arrayOf("what"), 2084 to arrayOf("editor", "why"), 2103 to arrayOf("files"), 2113 to arrayOf("why"), 2115 to arrayOf("title"), 2116 to arrayOf("title"), 2117 to arrayOf("version"), 2118 to arrayOf("version", "size", "folder"), 2119 to arrayOf("version", "size", "folder"), 2128 to arrayOf("title"), 2132 to arrayOf("dir", "files"), 2138 to arrayOf("why"), 2140 to arrayOf("code"), 2154 to arrayOf("origin"), 2156 to arrayOf("why"), 2167 to arrayOf("dir"), 2168 to arrayOf("path"), 2169 to arrayOf("home", "other"), 2171 to arrayOf("path"), 2172 to arrayOf("code", "log"), 2173 to arrayOf("log"), 2175 to arrayOf("addr"), 2188 to arrayOf("home"), 2189 to arrayOf("addr"), 2204 to arrayOf("dir", "why"), 2205 to arrayOf("dir"), 2220 to arrayOf("phase"), 2222 to arrayOf("why"), 2223 to arrayOf("what"), 2224 to arrayOf("code"), 2230 to arrayOf("label"), 2235 to arrayOf("kind"), 2237 to arrayOf("project"), 2250 to arrayOf("what"), 2252 to arrayOf("when"), 2256 to arrayOf("n"), 2257 to arrayOf("n"), 2258 to arrayOf("n"), 2260 to arrayOf("agent"), 2261 to arrayOf("effort"), 2263 to arrayOf("n"), 2265 to arrayOf("model"), 2280 to arrayOf("word"), 2287 to arrayOf("more", "step"), 2291 to arrayOf("name"), 2295 to arrayOf("max", "skipped"), 2298 to arrayOf("name"), 2299 to arrayOf("n"), 2300 to arrayOf("name"), 2301 to arrayOf("name"), 2307 to arrayOf("n"), 2308 to arrayOf("name"), 2310 to arrayOf("price"), 2313 to arrayOf("name"), 2315 to arrayOf("name"), 2316 to arrayOf("name"), 2317 to arrayOf("name"), 2318 to arrayOf("text"), 2321 to arrayOf("key"), 2322 to arrayOf("key"), 2323 to arrayOf("pct"), 2324 to arrayOf("when"), 2335 to arrayOf("n", "upstream"), 2344 to arrayOf("mb"), 2354 to arrayOf("path"), 2355 to arrayOf("path"), 2377 to arrayOf("id"), 2381 to arrayOf("model"), 2382 to arrayOf("platform"), 2383 to arrayOf("version"), 2386 to arrayOf("version", "from", "into"), 2387 to arrayOf("version", "from"), 2390 to arrayOf("version", "path"), 2391 to arrayOf("version", "path"), 2392 to arrayOf("version", "pin", "from"), 2393 to arrayOf("path"), 2394 to arrayOf("version", "path"), 2395 to arrayOf("version", "path", "set"), 2409 to arrayOf("turns", "input", "cread", "cwrite", "output", "cost"), 2416 to arrayOf("tool"), 2417 to arrayOf("tool"), 2418 to arrayOf("tool", "word"), 2419 to arrayOf("tool", "word"), 2420 to arrayOf("tool"), 2421 to arrayOf("tool"), 2422 to arrayOf("due"), 2423 to arrayOf("due"), 2424 to arrayOf("due"), 2425 to arrayOf("due"), 2426 to arrayOf("zone"), 2427 to arrayOf("zone"), 2428 to arrayOf("zone"), 2429 to arrayOf("zone"), 2430 to arrayOf("n"), 2431 to arrayOf("who"), 2432 to arrayOf("n", "who"), 2433 to arrayOf("harness"), 2434 to arrayOf("path"), 2435 to arrayOf("path"), 2436 to arrayOf("path"), 2439 to arrayOf("error", "line"), 2440 to arrayOf("label"), 2448 to arrayOf("who"), 2449 to arrayOf("who"), 2450 to arrayOf("label", "left", "when"), 2451 to arrayOf("left"), 2452 to arrayOf("name", "left"), 2453 to arrayOf("used"), 2454 to arrayOf("used", "limit"), 2455 to arrayOf("used", "reason"), 2456 to arrayOf("used", "limit", "reason"), 2458 to arrayOf("provider"), 2459 to arrayOf("used", "window", "pct"), 2460 to arrayOf("rate"), 2470 to arrayOf("n", "r"), 2475 to arrayOf("time", "n"), 2479 to arrayOf("n", "m"), 2481 to arrayOf("pct"), 2482 to arrayOf("cost", "n"), 2486 to arrayOf("in", "out", "cread", "cwrite"), 2487 to arrayOf("in", "out", "cread", "cwrite", "n"), 2496 to arrayOf("turns", "input", "cread", "cwrite", "output"), 2497 to arrayOf("left", "when"), 2498 to arrayOf("left", "when"), 2499 to arrayOf("left", "when"), 2500 to arrayOf("left", "when"), 2524 to arrayOf("n"), 2547 to arrayOf("when"), 2554 to arrayOf("phrase", "now"), 2565 to arrayOf("s"), 2571 to arrayOf("now"), 2572 to arrayOf("now", "nudge", "sent", "undone"), 2582 to arrayOf("e"), 2583 to arrayOf("a", "ams", "b", "bms"), 2584 to arrayOf("ms"), 2585 to arrayOf("e"), 2586 to arrayOf("t"), 2587 to arrayOf("t"), 2588 to arrayOf("t"), 2594 to arrayOf("why"), 2604 to arrayOf("apps"), 2614 to arrayOf("n"), 2615 to arrayOf("n", "k"), 2620 to arrayOf("stt", "conf"), 2621 to arrayOf("words"), 2631 to arrayOf("into"), 2634 to arrayOf("origin"), 2646 to arrayOf("url"), 2648 to arrayOf("url"), 2656 to arrayOf("i", "n"), 2657 to arrayOf("d", "n"), 2666 to arrayOf("version"), 2667 to arrayOf("version"), 2668 to arrayOf("version"), 2671 to arrayOf("path"), 2679 to arrayOf("addr"), 2683 to arrayOf("label"), 2685 to arrayOf("label"), 2686 to arrayOf("label"), 2690 to arrayOf("label"), 2695 to arrayOf("from"), 2712 to arrayOf("done", "of"), 2718 to arrayOf("n"), 2719 to arrayOf("t", "m"), 2720 to arrayOf("m"), 2721 to arrayOf("b", "m"), 2722 to arrayOf("r", "p"), 2723 to arrayOf("n"), 2724 to arrayOf("n"), 2725 to arrayOf("n"), 2726 to arrayOf("n"), 2729 to arrayOf("n"), 2731 to arrayOf("n"), 2739 to arrayOf("n"), 2745 to arrayOf("name", "gb", "path"), 2747 to arrayOf("path", "why"), 2749 to arrayOf("names"), 2751 to arrayOf("why"), 2752 to arrayOf("p", "pn", "t", "tn", "e", "en"), 2753 to arrayOf("done", "total"), 2754 to arrayOf("n"), 2755 to arrayOf("what"), 2756 to arrayOf("n"), 2757 to arrayOf("n"), 2760 to arrayOf("what"), 2761 to arrayOf("n"), 2763 to arrayOf("why", "from"), 2764 to arrayOf("why"), 2770 to arrayOf("path"), 2771 to arrayOf("path", "who"), 2772 to arrayOf("path"), 2773 to arrayOf("path", "cmd"), 2774 to arrayOf("version", "path"), 2775 to arrayOf("version", "path"), 2776 to arrayOf("version", "path", "who"), 2777 to arrayOf("version", "path"), 2778 to arrayOf("version", "path", "cmd"), 2781 to arrayOf("cmd"), 2791 to arrayOf("name", "version", "path"), 2792 to arrayOf("path", "why"), 2793 to arrayOf("name"), 2795 to arrayOf("version", "cli"), 2796 to arrayOf("cli"), 2798 to arrayOf("version"), 2799 to arrayOf("version"), 2801 to arrayOf("version"), 2803 to arrayOf("version"), 2805 to arrayOf("computer"), 2806 to arrayOf("version", "cli"), 2807 to arrayOf("cli"), 2808 to arrayOf("version", "cli"), 2809 to arrayOf("cli"), 2831 to arrayOf("n"), 2836 to arrayOf("code"), 2838 to arrayOf("e"), 2851 to arrayOf("n"), 2856 to arrayOf("channel"), 2870 to arrayOf("project"), 2876 to arrayOf("n"), 2888 to arrayOf("m"), 2900 to arrayOf("m"), 2903 to arrayOf("m"), 2910 to arrayOf("pages"), 2912 to arrayOf("name"), 2915 to arrayOf("name"), 2924 to arrayOf("d", "n"), 2945 to arrayOf("n", "tools"), 2946 to arrayOf("n", "tools", "d"), 2947 to arrayOf("n", "d"), 2948 to arrayOf("n", "what"), 2949 to arrayOf("n", "d", "what"), 2953 to arrayOf("head"), 2959 to arrayOf("name", "path"), 2965 to arrayOf("page", "net", "near"), 2966 to arrayOf("page", "what"), 2967 to arrayOf("ref"), 2971 to arrayOf("page"), 2994 to arrayOf("n"), 2995 to arrayOf("n"), 2996 to arrayOf("n"), 2998 to arrayOf("hub"), 3020 to arrayOf("project"), 3022 to arrayOf("n"), 3023 to arrayOf("n"), 3024 to arrayOf("word"), 3025 to arrayOf("n"), 3043 to arrayOf("name"), 3051 to arrayOf("answer"), 3056 to arrayOf("why"), 3058 to arrayOf("hub"), 3064 to arrayOf("from", "to"), 3071 to arrayOf("project"), 3081 to arrayOf("name"), 3085 to arrayOf("n"), 3091 to arrayOf("code"), 3092 to arrayOf("hub"), 3093 to arrayOf("hub"), 3094 to arrayOf("hub"), 3108 to arrayOf("n"), 3109 to arrayOf("n"), 3125 to arrayOf("status"), 3127 to arrayOf("status"), 3156 to arrayOf("project"), 3160 to arrayOf("code"), 3162 to arrayOf("why"), 3170 to arrayOf("title"), 3176 to arrayOf("title"), 3178 to arrayOf("q"), 3179 to arrayOf("title"), 3184 to arrayOf("room"), 3188 to arrayOf("q"), 3198 to arrayOf("title"), 3203 to arrayOf("n"), 3204 to arrayOf("n"), 3209 to arrayOf("at"), 3217 to arrayOf("size"), 3219 to arrayOf("n", "total"), 3236 to arrayOf("n"), 3237 to arrayOf("what"), 3240 to arrayOf("device"), 3241 to arrayOf("device"), 3250 to arrayOf("word", "count"), 3251 to arrayOf("heard"), 3263 to arrayOf("files"), 3264 to arrayOf("files"), 3267 to arrayOf("name"), 3295 to arrayOf("n"), 3296 to arrayOf("n"), 3307 to arrayOf("n"), 3341 to arrayOf("root"), 3342 to arrayOf("path"), 3365 to arrayOf("name"), 3368 to arrayOf("until"), 3369 to arrayOf("error"), 3376 to arrayOf("url"), 3380 to arrayOf("name"), 3381 to arrayOf("name"), 3389 to arrayOf("code", "hub", "until"), 3390 to arrayOf("url"), 3394 to arrayOf("kinds"), 3395 to arrayOf("address"), 3397 to arrayOf("address"), 3400 to arrayOf("url"), 3401 to arrayOf("url"), 3402 to arrayOf("url"), 3403 to arrayOf("url", "via"), 3408 to arrayOf("name"), 3409 to arrayOf("url", "check", "left"), 3411 to arrayOf("check"), 3412 to arrayOf("address"), 3413 to arrayOf("name"), 3414 to arrayOf("error"), 3415 to arrayOf("url"), 3416 to arrayOf("url"), 3423 to arrayOf("code", "address", "left"), 3429 to arrayOf("name"), 3430 to arrayOf("name"), 3441 to arrayOf("address"), 3448 to arrayOf("code", "body"), 3451 to arrayOf("code", "body"), 3457 to arrayOf("window", "used"), 3458 to arrayOf("window", "used", "when"), 3459 to arrayOf("window", "used"), 3460 to arrayOf("window", "used", "when"), 3461 to arrayOf("provider"), 3473 to arrayOf("label"), 3474 to arrayOf("when"), 3476 to arrayOf("provider"), 3477 to arrayOf("provider", "title", "why"), 3497 to arrayOf("reason"), 3505 to arrayOf("code"), 3514 to arrayOf("name"), 3517 to arrayOf("version"), 3518 to arrayOf("version"), 3519 to arrayOf("version"), 3521 to arrayOf("version"), 3522 to arrayOf("version"), 3523 to arrayOf("version"), 3524 to arrayOf("version", "why"), 3525 to arrayOf("version"), 3527 to arrayOf("code"), 3543 to arrayOf("name"), 3550 to arrayOf("count"), 3551 to arrayOf("title"), 3552 to arrayOf("name"), 3555 to arrayOf("n", "holder"), 3556 to arrayOf("n", "title"), 3557 to arrayOf("title"), 3560 to arrayOf("n"), 3561 to arrayOf("n"), 3562 to arrayOf("n"), 3563 to arrayOf("n"), 3564 to arrayOf("harness", "typed", "type", "remote", "host", "wt", "branch"), 3574 to arrayOf("pid"), 3579 to arrayOf("left"), 3580 to arrayOf("left"), 3586 to arrayOf("left"), 3587 to arrayOf("left"), 3588 to arrayOf("left"), 3589 to arrayOf("left"), 3590 to arrayOf("label", "left"), 3591 to arrayOf("when"), 3592 to arrayOf("used"), 3593 to arrayOf("used", "limit"), 3615 to arrayOf("tracking"), 3619 to arrayOf("total"), 3620 to arrayOf("price"), 3621 to arrayOf("price"), 3626 to arrayOf("n"), 3627 to arrayOf("parts"), 3628 to arrayOf("note"), 3629 to arrayOf("error"), 3630 to arrayOf("error", "parts"), 3635 to arrayOf("state"), 3636 to arrayOf("name", "path"), 3637 to arrayOf("name", "path", "why"), 3639 to arrayOf("code"), 3643 to arrayOf("detail"), 3645 to arrayOf("why"), 3646 to arrayOf("parts"), 3649 to arrayOf("build", "to"), 3650 to arrayOf("build"), 3651 to arrayOf("build", "skip"), 3653 to arrayOf("why"), 3654 to arrayOf("why"), 3655 to arrayOf("build"), 3656 to arrayOf("build", "why"), 3657 to arrayOf("build"), 3658 to arrayOf("build"), 3662 to arrayOf("build"), 3663 to arrayOf("build"), 3665 to arrayOf("build"), 3672 to arrayOf("build"), 3706 to arrayOf("step"), 3707 to arrayOf("p", "pt", "t", "tt", "e", "et"), 3708 to arrayOf("done", "total"), 3709 to arrayOf("n"), 3710 to arrayOf("n"), 3711 to arrayOf("n"), 3716 to arrayOf("n"), 3719 to arrayOf("why"), 3720 to arrayOf("why", "from"), 3721 to arrayOf("error"), 3723 to arrayOf("n"), 3724 to arrayOf("n"), 3728 to arrayOf("n"), 3731 to arrayOf("name", "gb", "path"), 3732 to arrayOf("path", "why"), 3733 to arrayOf("names"), 3735 to arrayOf("why"), 3746 to arrayOf("n", "total"), 3750 to arrayOf("title"), 3752 to arrayOf("n"), 3756 to arrayOf("name"), 3757 to arrayOf("title"), 3758 to arrayOf("note"), 3760 to arrayOf("machine"), 3761 to arrayOf("machines"), 3762 to arrayOf("machine"), 3773 to arrayOf("n"), 3775 to arrayOf("n"), 3779 to arrayOf("name"), 3782 to arrayOf("name"), 3799 to arrayOf("why"), 3805 to arrayOf("project"), 3846 to arrayOf("path"), 3847 to arrayOf("path"), 3849 to arrayOf("have", "total"), 3854 to arrayOf("files", "added", "removed"), 3855 to arrayOf("added", "removed"), 3862 to arrayOf("n"), 3871 to arrayOf("hub"), 3874 to arrayOf("title"), 3878 to arrayOf("project"), 3879 to arrayOf("project"), 3880 to arrayOf("n"), 3881 to arrayOf("hub"), 3883 to arrayOf("n"), 3884 to arrayOf("n"), 3885 to arrayOf("model"), 3891 to arrayOf("name"), 3910 to arrayOf("word"), 3916 to arrayOf("answer"), 3926 to arrayOf("version", "build"), 3927 to arrayOf("hub"), 3932 to arrayOf("name"), 3935 to arrayOf("when", "who", "mark"), 3939 to arrayOf("who"), 3943 to arrayOf("time"), 3944 to arrayOf("address"), 3946 to arrayOf("kind", "name"), 3961 to arrayOf("title"), 3962 to arrayOf("query"), 3965 to arrayOf("room"), 3966 to arrayOf("query"), 3968 to arrayOf("n"), 3969 to arrayOf("n"), 3970 to arrayOf("n"), 3976 to arrayOf("size"), 3980 to arrayOf("n"), 3981 to arrayOf("n"), 3982 to arrayOf("n"), 3996 to arrayOf("status"), 3998 to arrayOf("status"), 4149 to arrayOf("code"), 4151 to arrayOf("n"), 4153 to arrayOf("why"), 4165 to arrayOf("done", "of"), 4169 to arrayOf("thread"), 4172 to arrayOf("n"), 4180 to arrayOf("title"), 4181 to arrayOf("note"), 4182 to arrayOf("label"), 4183 to arrayOf("machine"), 4184 to arrayOf("machine"), 4191 to arrayOf("at", "total"), 4192 to arrayOf("at", "total"), 4196 to arrayOf("machine"), 4197 to arrayOf("machine"), 4198 to arrayOf("machines"), 4200 to arrayOf("device"), 4207 to arrayOf("price"), 4208 to arrayOf("price"), 4215 to arrayOf("home"), 4220 to arrayOf("from"), 4222 to arrayOf("note"), 4223 to arrayOf("note"), 4225 to arrayOf("v"), 4226 to arrayOf("v"), 4227 to arrayOf("v", "who"), 4229 to arrayOf("who"), 4230 to arrayOf("v"), 4232 to arrayOf("v", "cmd"), 4233 to arrayOf("cmd"), 4238 to arrayOf("v", "path"), 4239 to arrayOf("v", "note"), 4240 to arrayOf("v"), 4245 to arrayOf("tool"), 4246 to arrayOf("tool"), 4271 to arrayOf("n", "w"), 4272 to arrayOf("why"), 4273 to arrayOf("state", "why"), 4285 to arrayOf("project"), 4286 to arrayOf("n"), 4297 to arrayOf("why"), 4303 to arrayOf("name"), 4314 to arrayOf("project"), 4319 to arrayOf("n"), 4327 to arrayOf("names"), 4335 to arrayOf("dest"), 4337 to arrayOf("repo"), 4338 to arrayOf("repo"), 4340 to arrayOf("url"), 4355 to arrayOf("time"), 4390 to arrayOf("group"), 4394 to arrayOf("project"), 4395 to arrayOf("n"), 4396 to arrayOf("n"), 4397 to arrayOf("n"), 4398 to arrayOf("n"), 4406 to arrayOf("n"), 4463 to arrayOf("n"), 4464 to arrayOf("n"), 4465 to arrayOf("a", "b"), 4466 to arrayOf("n"), 4468 to arrayOf("parts", "lines"), 4469 to arrayOf("n"), 4500 to arrayOf("what", "project", "fab"), 4501 to arrayOf("rev", "day"), 4509 to arrayOf("n"), 4520 to arrayOf("layer"), 4521 to arrayOf("n"), 4526 to arrayOf("board"), 4538 to arrayOf("others"), 4539 to arrayOf("must", "should", "notes"), 4540 to arrayOf("id", "w"), 4550 to arrayOf("what"), 4553 to arrayOf("why"), 4554 to arrayOf("why"), 4561 to arrayOf("n"), 4577 to arrayOf("price", "n"), 4578 to arrayOf("n", "need"), 4579 to arrayOf("n"), 4580 to arrayOf("n"), 4581 to arrayOf("cost"), 4582 to arrayOf("cost"), 4595 to arrayOf("day", "n"), 4596 to arrayOf("day"), 4597 to arrayOf("cost", "n", "lines"), 4598 to arrayOf("stock", "price"), 4599 to arrayOf("lines"), 4620 to arrayOf("host"), 4631 to arrayOf("n"), 4632 to arrayOf("a", "b"), 4633 to arrayOf("n"), 4634 to arrayOf("n"), 4637 to arrayOf("day"), 4638 to arrayOf("n"), 4639 to arrayOf("n"), 4640 to arrayOf("n"), 4681 to arrayOf("turn"), 4795 to arrayOf("text"), 4798 to arrayOf("repo", "dest"), 4799 to arrayOf("repo", "dest"), 4800 to arrayOf("repo"), 4805 to arrayOf("dir"), 4806 to arrayOf("dir"), 4810 to arrayOf("editor", "job", "secs"), 4811 to arrayOf("editor", "secs"), 4812 to arrayOf("editor"), 4829 to arrayOf("time"), 4835 to arrayOf("status"), 4843 to arrayOf("time"), 4844 to arrayOf("time", "dur"), 4847 to arrayOf("answer"), 4851 to arrayOf("type"), 4852 to arrayOf("max"), 4880 to arrayOf("bytes", "tokens"), 4913 to arrayOf("what"), 4917 to arrayOf("n"), 4919 to arrayOf("n"), 4943 to arrayOf("n"), 4944 to arrayOf("done", "total"), 4952 to arrayOf("v"), 4953 to arrayOf("x", "y"), 4959 to arrayOf("machine"), 4962 to arrayOf("days"), 4963 to arrayOf("warnings"), 4969 to arrayOf("n"), 4974 to arrayOf("n"), 4976 to arrayOf("found", "total", "q"), 4979 to arrayOf("model"), 4980 to arrayOf("model", "conf"), 5012 to arrayOf("v", "path"), 5013 to arrayOf("v", "n", "from"), 5014 to arrayOf("v", "step"), 5015 to arrayOf("why"), 5017 to arrayOf("v", "cli"), 5018 to arrayOf("v", "cli"), 5020 to arrayOf("v"), 5025 to arrayOf("v", "n", "from", "folder"), 5026 to arrayOf("v", "from"), 5027 to arrayOf("done", "total"), 5035 to arrayOf("name"), 5037 to arrayOf("n"), 5038 to arrayOf("step"), 5040 to arrayOf("name"), 5042 to arrayOf("pct"), 5044 to arrayOf("name")) }
+  internal val exactText: Array<String> by lazy { arrayOf(*exactText0(), *exactText1(), *exactText2(), *exactText3(), *exactText4(), *exactText5(), *exactText6(), *exactText7(), *exactText8(), *exactText9(), *exactText10(), *exactText11(), *exactText12(), *exactText13(), *exactText14()) }
+  internal val exactKey: IntArray by lazy { intArrayOf(0, 1, 2, 3, 4, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 3190, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 43, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 3758, 61, 62, 63, 64, 3616, 67, 69, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 85, 86, 3797, 88, 89, 99, 100, 3119, 3796, 103, 104, 106, 107, 108, 110, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 156, 157, 158, 160, 162, 163, 164, 3239, 166, 167, 3241, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 3200, 184, 188, 190, 194, 195, 196, 198, 199, 200, 201, 202, 203, 207, 210, 214, 216, 217, 218, 220, 221, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 235, 236, 3006, 238, 239, 240, 241, 3757, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 261, 263, 264, 265, 266, 267, 268, 271, 272, 273, 274, 276, 280, 281, 282, 283, 287, 288, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299, 301, 302, 3211, 306, 307, 308, 309, 310, 311, 312, 314, 315, 316, 318, 320, 334, 3805, 337, 3804, 3807, 341, 3817, 343, 344, 345, 346, 355, 3188, 358, 359, 360, 361, 362, 363, 364, 365, 366, 367, 368, 369, 370, 371, 372, 373, 374, 3009, 377, 378, 379, 380, 381, 382, 383, 384, 385, 386, 387, 388, 389, 390, 391, 392, 393, 394, 395, 396, 397, 398, 399, 400, 401, 402, 403, 404, 405, 406, 407, 408, 409, 410, 411, 412, 413, 414, 415, 416, 417, 418, 419, 421, 422, 423, 424, 425, 426, 427, 428, 429, 430, 431, 3001, 3002, 434, 435, 436, 437, 438, 439, 440, 441, 442, 443, 444, 445, 446, 447, 448, 449, 450, 451, 452, 453, 455, 456, 457, 3218, 459, 460, 461, 462, 463, 2991, 465, 466, 467, 3121, 469, 470, 471, 472, 473, 474, 475, 476, 477, 478, 479, 480, 481, 482, 483, 484, 485, 486, 487, 488, 489, 490, 491, 492, 493, 494, 495, 496, 497, 498, 499, 500, 501, 502, 503, 504, 505, 506, 507, 508, 509, 510, 511, 512, 513, 514, 515, 516, 517, 518, 519, 520, 521, 522, 523, 524, 525, 526, 527, 528, 529, 530, 531, 532, 533, 534, 535, 536, 537, 538, 539, 540, 541, 542, 543, 544, 545, 546, 547, 548, 549, 550, 551, 552, 553, 554, 555, 556, 558, 559, 560, 561, 562, 563, 564, 565, 567, 568, 569, 570, 571, 572, 573, 574, 575, 576, 577, 578, 579, 580, 594, 630, 631, 632, 3226, 3227, 638, 639, 640, 641, 642, 643, 644, 645, 646, 647, 648, 649, 653, 654, 3870, 656, 658, 659, 661, 665, 666, 667, 668, 669, 670, 671, 672, 673, 674, 675, 676, 677, 678, 679, 680, 682, 683, 684, 685, 686, 688, 689, 691, 692, 694, 695, 696, 697, 700, 706, 726, 730, 731, 732, 733, 734, 3802, 736, 737, 738, 739, 3225, 741, 742, 743, 744, 745, 746, 747, 748, 749, 750, 751, 752, 753, 754, 755, 756, 757, 758, 759, 760, 761, 762, 763, 764, 765, 766, 767, 768, 769, 770, 771, 772, 773, 774, 775, 776, 777, 778, 779, 780, 781, 782, 783, 784, 785, 786, 787, 788, 789, 790, 791, 792, 793, 794, 795, 796, 797, 798, 799, 800, 801, 802, 803, 804, 805, 3785, 807, 808, 809, 810, 811, 812, 813, 814, 815, 816, 817, 818, 819, 820, 821, 822, 823, 824, 825, 826, 827, 828, 829, 830, 831, 834, 835, 836, 837, 838, 839, 840, 841, 842, 843, 845, 846, 847, 849, 850, 3221, 852, 854, 855, 856, 859, 860, 861, 862, 863, 864, 865, 866, 867, 868, 869, 3795, 871, 872, 873, 874, 875, 876, 877, 878, 879, 880, 881, 882, 883, 884, 885, 886, 887, 888, 889, 890, 891, 892, 893, 894, 895, 896, 897, 898, 899, 900, 901, 902, 903, 3872, 905, 906, 909, 910, 911, 912, 913, 914, 915, 916, 917, 918, 919, 920, 921, 922, 923, 924, 925, 926, 927, 928, 929, 930, 931, 932, 933, 934, 935, 936, 937, 938, 939, 940, 941, 942, 943, 944, 945, 946, 947, 948, 949, 950, 951, 952, 953, 954, 955, 956, 957, 958, 959, 960, 961, 962, 963, 964, 3191, 966, 967, 968, 969, 970, 971, 3820, 973, 3046, 3103, 976, 977, 978, 980, 981, 989, 990, 991, 993, 994, 995, 997, 998, 999, 1000, 1001, 1002, 1003, 1004, 1005, 1007, 1008, 1009, 1010, 1011, 1012, 1013, 1014, 1015, 1016, 1017, 1018, 1019, 1020, 3823, 1022, 1023, 1024, 1027, 1031, 1032, 1033, 2998, 3072, 1036, 1037, 1038, 1039, 1040, 1041, 1042, 1043, 1044, 1045, 1047, 1048, 1051, 1052, 1053, 1054, 1055, 1056, 1057, 1058, 1059, 1060, 1061, 1062, 1063, 1064, 1065, 1066, 1067, 1068, 1069, 1070, 1071, 1072, 1073, 1074, 1076, 1084, 1085, 1088, 1089, 1090, 1092, 1093, 1094, 3837, 1096, 1097, 1100, 1101, 1102, 3220, 1104, 1105, 1106, 1107, 1108, 1109, 1110, 1112, 1113, 1114, 1115, 1116, 1117, 1118, 3822, 1122, 1125, 1126, 1127, 1129, 1130, 1131, 1132, 1133, 1134, 1135, 1136, 1137, 1138, 1139, 1140, 1141, 1142, 1143, 1144, 1145, 1146, 1147, 1148, 1152, 1153, 1154, 1155, 1156, 1157, 1160, 1164, 1165, 1167, 1172, 1173, 1174, 1175, 1178, 1180, 1182, 1183, 1184, 1186, 1187, 1188, 1189, 1190, 1191, 1192, 1193, 1194, 1195, 1196, 1197, 1199, 1200, 1201, 1202, 1203, 1204, 1205, 1208, 1209, 1210, 1211, 1212, 1213, 1214, 1215, 1216, 1217, 1218, 1219, 1220, 1222, 1224, 1225, 3000, 1227, 1228, 1229, 1230, 1231, 1232, 1233, 1234, 1235, 1236, 1237, 1238, 1239, 1242, 1243, 1246, 1247, 1248, 1249, 1250, 1252, 1255, 1256, 1257, 1258, 1259, 1260, 1262, 1263, 1264, 1265, 1266, 1267, 1268, 1269, 1271, 1272, 1273, 1274, 1275, 1276, 1277, 1279, 1280, 1281, 1282, 1283, 1290, 1291, 1292, 1293, 1296, 1298, 1299, 1300, 1301, 1303, 1307, 1308, 1310, 1311, 1312, 1313, 1317, 1318, 1320, 1321, 1322, 1324, 1325, 1326, 1327, 1328, 1329, 1330, 1331, 1332, 1337, 1340, 1341, 1342, 1343, 1346, 1349, 1350, 1358, 1359, 3535, 1363, 1364, 1365, 1366, 1367, 1368, 3602, 1375, 1377, 1382, 1386, 1387, 3076, 1389, 1390, 1391, 1392, 1393, 1394, 1395, 1396, 1397, 1398, 1399, 1400, 1401, 1402, 1403, 1404, 1405, 1406, 1407, 1408, 1409, 1410, 1411, 1412, 1413, 1414, 3003, 1419, 1420, 1421, 1422, 1423, 1424, 1425, 1426, 1427, 1428, 1429, 1430, 1431, 1432, 1433, 1434, 1435, 3120, 3613, 1438, 1440, 1441, 1442, 1443, 1444, 1445, 1446, 1447, 1448, 1449, 1450, 1451, 1452, 1453, 1454, 1455, 1456, 1457, 1458, 1459, 1460, 1461, 1462, 1463, 1464, 1465, 1466, 1467, 1468, 1469, 1470, 1471, 3615, 1475, 1476, 1477, 1479, 1480, 1481, 1482, 1483, 1484, 1485, 1486, 1487, 1488, 1489, 1490, 1491, 1492, 1495, 1496, 3760, 1498, 1499, 1500, 1501, 3772, 3778, 1504, 1505, 1506, 1507, 1508, 1510, 1511, 1512, 1513, 1514, 1515, 1516, 1517, 1518, 1519, 1526, 1528, 1529, 1530, 1532, 1535, 1536, 1537, 1538, 1539, 1540, 1541, 1542, 1543, 3879, 1545, 1546, 1547, 1548, 1549, 1550, 1551, 1552, 1553, 1554, 1555, 1556, 1557, 1558, 1559, 1560, 1561, 1562, 1563, 1564, 1565, 1566, 1567, 1568, 1569, 1570, 1571, 1572, 1573, 1574, 1575, 1576, 1577, 1578, 1579, 1580, 1581, 1582, 1583, 1584, 1586, 1587, 1588, 1589, 1591, 1592, 1593, 1594, 1595, 1598, 1599, 1600, 1601, 1602, 1603, 1604, 1605, 1607, 1608, 1609, 1610, 1611, 1612, 1613, 1614, 1615, 1616, 1617, 1618, 1619, 1620, 1621, 1622, 1623, 1624, 1625, 1626, 1627, 1628, 1629, 1630, 1631, 1632, 1633, 1634, 1635, 1636, 1637, 1638, 1640, 1641, 1642, 1643, 1644, 1645, 1646, 1647, 3079, 1649, 1650, 1651, 1652, 1653, 1654, 1655, 1656, 1657, 1658, 1659, 1660, 1661, 1663, 1664, 1665, 1666, 1667, 1668, 1669, 1674, 1675, 1676, 1677, 1678, 1679, 1680, 1681, 3489, 1683, 1684, 1685, 1686, 3490, 1688, 1689, 1690, 1691, 1692, 1693, 1694, 1695, 1696, 1697, 1698, 1699, 3012, 1705, 1707, 1709, 1711, 1715, 1719, 1725, 1727, 1728, 1729, 1731, 1732, 1733, 1734, 1735, 1736, 1738, 1740, 1741, 1742, 1743, 1744, 1746, 1747, 3784, 1749, 1750, 1751, 1752, 1753, 1754, 1755, 1757, 1758, 1760, 1761, 1762, 1763, 1764, 1765, 1766, 1767, 1768, 1769, 1770, 1771, 1772, 1773, 1774, 1775, 1778, 1779, 1780, 1781, 1782, 1783, 1784, 1785, 1786, 1787, 1788, 1789, 1790, 1791, 1792, 1793, 1794, 1795, 1796, 1797, 1798, 1799, 1800, 1801, 1802, 1803, 1804, 1805, 1806, 1807, 1808, 1809, 1810, 1811, 1812, 1813, 1814, 1815, 1816, 1817, 1818, 1819, 1820, 1821, 1822, 1823, 1824, 1825, 1826, 1827, 1828, 1829, 1830, 1831, 1832, 1833, 1834, 1835, 1836, 1837, 1838, 1839, 1840, 1841, 1843, 1844, 3055, 1853, 1855, 1859, 3037, 1861, 1862, 3038, 1864, 1865, 1869, 3102, 1871, 1872, 1873, 1874, 1875, 1876, 1877, 1878, 1879, 1881, 1886, 1888, 1889, 1890, 1891, 1892, 1893, 3117, 1895, 1896, 1899, 1900, 1910, 1911, 1915, 1916, 1917, 1918, 1919, 1920, 1921, 1922, 1924, 1925, 1926, 1927, 1928, 1929, 1930, 1931, 1932, 1933, 1934, 1935, 1936, 1937, 1938, 1939, 1944, 1945, 1946, 1947, 1948, 1949, 1950, 1951, 1952, 1953, 1954, 1955, 1956, 1957, 1959, 1960, 1962, 1963, 1973, 1975, 1976, 1979, 1980, 1983, 1984, 1985, 1987, 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995, 1996, 1997, 1998, 1999, 2000, 2001, 2002, 2003, 2005, 2011, 2012, 2013, 2014, 2018, 3178, 2024, 2025, 2027, 2028, 2029, 2030, 3830, 3831, 2039, 2041, 2042, 2043, 2045, 2046, 2047, 2048, 2049, 2050, 2051, 2052, 2053, 2056, 2057, 2059, 2060, 2063, 2064, 3163, 3164, 3165, 2072, 3391, 2074, 2076, 2077, 2078, 2079, 2080, 2081, 2082, 2083, 2084, 2085, 2086, 2087, 2088, 2091, 2092, 2093, 2094, 2095, 2096, 2100, 2101, 2102, 2103, 2104, 2105, 2106, 2107, 2108, 2109, 2110, 2111, 2112, 2113, 2114, 2115, 2116, 2117, 2119, 2120, 2121, 2122, 2123, 2124, 2125, 2126, 2127, 2129, 2135, 2136, 2137, 2138, 2139, 2140, 2141, 2142, 2144, 2145, 2146, 3105, 2150, 2151, 2152, 2154, 2156, 2157, 2158, 2159, 3028, 3153, 3154, 3155, 3156, 3157, 2166, 2167, 2168, 2170, 3030, 3031, 3021, 3020, 2176, 3022, 2178, 3026, 2180, 3389, 2185, 2189, 2191, 2192, 2193, 2194, 2195, 2196, 2197, 2198, 2199, 2200, 2201, 3056, 2205, 2206, 2207, 2208, 3089, 2210, 2211, 2212, 2213, 2214, 2215, 2216, 2217, 2218, 2221, 3402, 2223, 2224, 2225, 2226, 3071, 2228, 2229, 2230, 2231, 3019, 2233, 3134, 2236, 2240, 2241, 3679, 2243, 2244, 3766, 3767, 2248, 3216, 2251, 3755, 2254, 2255, 2256, 2257, 2258, 3815, 2260, 3186, 2262, 3185, 2264, 2266, 2268, 2269, 2270, 2274, 2277, 2279, 2281, 2282, 2283, 2284, 2285, 2286, 2287, 2288, 2289, 2290, 2291, 2292, 2293, 2294, 2296, 2297, 2298, 3773, 2300, 2301, 2303, 3063, 3061, 3065, 2309, 2311, 2312, 2318, 2319, 2320, 2321, 3101, 2326, 2327, 2329, 2334, 2335, 3045, 3614, 3008, 3007, 3010, 3130, 3133, 2348, 2349, 2351, 2352, 2353, 2354, 2355, 2356, 2357, 2358, 2360, 2361, 2362, 2363, 2364, 2365, 2366, 2367, 2368, 3834, 2372, 2373, 2374, 2375, 2376, 2377, 2378, 2379, 2380, 2381, 2382, 2383, 2384, 2385, 2386, 2391, 2393, 2394, 2395, 2399, 2400, 2403, 2404, 2411, 2412, 2413, 2414, 2415, 2416, 2417, 2418, 2419, 2420, 2421, 2422, 2423, 2425, 2426, 2427, 2428, 2429, 2430, 2452, 2453, 2456, 2457, 2458, 2459, 2460, 2461, 2462, 2472, 2476, 2477, 2478, 2479, 2480, 2481, 2482, 2483, 2484, 2486, 2487, 2488, 2489, 2491, 2492, 2493, 2495, 2498, 2499, 2500, 2503, 2504, 2505, 2506, 2507, 2508, 2509, 2510, 2516, 2517, 2518, 2519, 2520, 2521, 2522, 2523, 2524, 2525, 2526, 2527, 2528, 2529, 2530, 2531, 2532, 2533, 2534, 2535, 2536, 2537, 2538, 2539, 2540, 2542, 2543, 2544, 2545, 2546, 2547, 2548, 2549, 2550, 2551, 2552, 2553, 2554, 2555, 2556, 2557, 2558, 2559, 2560, 2561, 2562, 2563, 2564, 2565, 2567, 2568, 2569, 2570, 3167, 2572, 2574, 2575, 2577, 2578, 2579, 2580, 2581, 2582, 2583, 2586, 2587, 2588, 2589, 2592, 2593, 2594, 2595, 2596, 2597, 2598, 2599, 2600, 2608, 2609, 2610, 2611, 2614, 2615, 2616, 2617, 2618, 2619, 2620, 2621, 2622, 2624, 2625, 2626, 2627, 2628, 2629, 2630, 2631, 2632, 2635, 2637, 2638, 2641, 2642, 2643, 2644, 2645, 2646, 2647, 2648, 2649, 2651, 2652, 2654, 2655, 2656, 2657, 2658, 2659, 2660, 2661, 2662, 2663, 2664, 2666, 2668, 2671, 2673, 3763, 2678, 2679, 2680, 2681, 2682, 2683, 2684, 2688, 2689, 2691, 2692, 2693, 2694, 2695, 2696, 2697, 2699, 2700, 2701, 2706, 2707, 2708, 2710, 2711, 2712, 2713, 2715, 2716, 2717, 2718, 2719, 2720, 2721, 2722, 2723, 2724, 2725, 2726, 2727, 3736, 2729, 2730, 2732, 3733, 2734, 2735, 3737, 3734, 2747, 2751, 3744, 3240, 3745, 2755, 3746, 2757, 2759, 3748, 2761, 3749, 2763, 2765, 3753, 3731, 3724, 3732, 2784, 2785, 2787, 2788, 2798, 2799, 2801, 2802, 2803, 2804, 2805, 2806, 2807, 2808, 2809, 2813, 2816, 2819, 2821, 2823, 2829, 2830, 2831, 2832, 2833, 2834, 2835, 2836, 2837, 2838, 2839, 2840, 2841, 3411, 2843, 2844, 2845, 2846, 2847, 2849, 2851, 2852, 3443, 2858, 2859, 2860, 2861, 2862, 2863, 2864, 2865, 2866, 2867, 2868, 2869, 2871, 2872, 2873, 2874, 2877, 2878, 2880, 2881, 2882, 2883, 3035, 2885, 2887, 2888, 2890, 2891, 2892, 2893, 2894, 2896, 2897, 2901, 2904, 2905, 2906, 2908, 2909, 2910, 2912, 2913, 2914, 2915, 2917, 2918, 2921, 2924, 2925, 2926, 2927, 2928, 2930, 2932, 2933, 2935, 2936, 2937, 2938, 2939, 2940, 2941, 2942, 2944, 2945, 2946, 2947, 2948, 2949, 2950, 2951, 2952, 2953, 2954, 2955, 2956, 2957, 2958, 2959, 2960, 2961, 2962, 2963, 2969, 2970, 2971, 2973, 2974, 2975, 2979, 2980, 2981, 2982, 2983, 2987, 2988, 2992, 2993, 2994, 2995, 2996, 2997, 2999, 3004, 3005, 3011, 3016, 3018, 3023, 3024, 3025, 3027, 3029, 3032, 3033, 3034, 3036, 3040, 3047, 3048, 3049, 3050, 3051, 3052, 3053, 3054, 3057, 3058, 3059, 3060, 3064, 3066, 3067, 3068, 3069, 3073, 3074, 3078, 3080, 3081, 3082, 3084, 3085, 3086, 3087, 3088, 3091, 3092, 3093, 3094, 3095, 3096, 3097, 3098, 3099, 3106, 3107, 3108, 3109, 3114, 3115, 3116, 3118, 3122, 3123, 3124, 3125, 3126, 3129, 3131, 3132, 3135, 3136, 3137, 3138, 3139, 3140, 3141, 3142, 3143, 3145, 3147, 3148, 3149, 3150, 3151, 3152, 3158, 3159, 3160, 3161, 3162, 3166, 3168, 3169, 3170, 3171, 3172, 3173, 3174, 3176, 3177, 3180, 3182, 3183, 3184, 3187, 3192, 3193, 3194, 3196, 3199, 3201, 3202, 3204, 3205, 3206, 3208, 3209, 3210, 3212, 3213, 3214, 3215, 3219, 3224, 3229, 3230, 3231, 3232, 3233, 3234, 3235, 3237, 3242, 3243, 3244, 3245, 3246, 3247, 3248, 3249, 3250, 3251, 3252, 3253, 3254, 3257, 3258, 3261, 3262, 3263, 3264, 3265, 3266, 3267, 3268, 3271, 3272, 3273, 3274, 3275, 3276, 3277, 3278, 3279, 3280, 3281, 3284, 3285, 3287, 3288, 3289, 3290, 3291, 3292, 3293, 3294, 3295, 3296, 3297, 3298, 3299, 3300, 3301, 3302, 3303, 3304, 3305, 3306, 3307, 3308, 3309, 3310, 3311, 3312, 3313, 3316, 3317, 3318, 3319, 3320, 3321, 3322, 3323, 3324, 3325, 3327, 3328, 3329, 3330, 3331, 3332, 3333, 3334, 3335, 3336, 3337, 3338, 3339, 3340, 3341, 3342, 3343, 3344, 3345, 3346, 3347, 3348, 3349, 3350, 3351, 3352, 3353, 3354, 3355, 3356, 3357, 3358, 3359, 3362, 3363, 3364, 3365, 3366, 3367, 3368, 3369, 3370, 3371, 3372, 3373, 3374, 3375, 3376, 3377, 3378, 3379, 3380, 3381, 3382, 3383, 3385, 3386, 3390, 3392, 3393, 3394, 3396, 3397, 3398, 3401, 3403, 3404, 3405, 3406, 3407, 3410, 3412, 3415, 3417, 3418, 3423, 3424, 3425, 3426, 3429, 3436, 3437, 3438, 3439, 3440, 3441, 3444, 3445, 3446, 3447, 3450, 3451, 3452, 3453, 3454, 3455, 3456, 3457, 3458, 3459, 3461, 3462, 3463, 3464, 3465, 3466, 3468, 3469, 3471, 3472, 3473, 3474, 3475, 3481, 3482, 3483, 3484, 3485, 3486, 3487, 3488, 3491, 3494, 3497, 3498, 3499, 3500, 3501, 3502, 3503, 3504, 3505, 3506, 3507, 3508, 3509, 3510, 3511, 3512, 3513, 3514, 3515, 3517, 3518, 3519, 3520, 3521, 3522, 3523, 3525, 3526, 3527, 3528, 3529, 3530, 3531, 3532, 3534, 3539, 3545, 3547, 3548, 3549, 3550, 3551, 3552, 3553, 3554, 3555, 3556, 3557, 3558, 3559, 3560, 3561, 3563, 3564, 3565, 3566, 3567, 3568, 3572, 3573, 3577, 3578, 3584, 3585, 3586, 3587, 3588, 3589, 3590, 3591, 3592, 3594, 3595, 3596, 3597, 3600, 3601, 3603, 3604, 3617, 3618, 3619, 3620, 3621, 3622, 3623, 3624, 3625, 3626, 3627, 3628, 3629, 3630, 3631, 3632, 3633, 3635, 3636, 3637, 3641, 3642, 3643, 3644, 3650, 3651, 3652, 3653, 3657, 3659, 3660, 3661, 3663, 3666, 3667, 3671, 3678, 3680, 3683, 3685, 3686, 3687, 3688, 3689, 3690, 3692, 3693, 3694, 3695, 3696, 3697, 3698, 3699, 3700, 3701, 3702, 3703, 3704, 3705, 3706, 3707, 3708, 3709, 3710, 3711, 3712, 3713, 3714, 3715, 3716, 3717, 3718, 3719, 3720, 3721, 3722, 3723, 3741, 3756, 3759, 3761, 3762, 3764, 3768, 3770, 3774, 3783, 3786, 3787, 3788, 3789, 3790, 3791, 3793, 3799, 3800, 3803, 3806, 3808, 3809, 3810, 3811, 3812, 3813, 3816, 3819, 3821, 3825, 3826, 3827, 3828, 3829, 3832, 3833, 3835, 3836, 3838, 3839, 3840, 3841, 3842, 3843, 3844, 3845, 3847, 3848, 3849, 3850, 3851, 3852, 3853, 3854, 3855, 3856, 3857, 3858, 3859, 3860, 3861, 3862, 3863, 3864, 3867, 3869, 3871, 3875, 3876, 3877, 3878, 3880, 3881, 3889, 3890, 3892, 3893, 3902, 3908, 3914, 3923, 3925, 3926, 3927, 3928, 3931, 3932, 3934, 3940, 3948, 3953, 3954, 3956, 3957, 3958, 3960, 3961, 3962, 3967, 3968, 3969, 3970, 3971, 3972, 3973, 3974, 3975, 3978, 3979, 3980, 4025, 4026, 4031, 4033, 4034, 4036, 4042, 4045, 4060, 4061, 4062, 4063, 4064, 4065, 4067, 4068, 4070, 4071, 4073, 4075, 4076, 4089, 4092, 4093, 4095, 4096, 4100, 4105, 4108, 4109, 4111, 4112, 4118, 4120, 4121, 4124, 4126, 4131, 4132, 4133, 4138, 4149, 4172, 4188, 4196, 4205, 4206, 4210, 4215, 4231, 4232, 4233, 4234, 4236, 4238, 4239, 4241, 4244, 4248, 4251, 4254, 4255, 4256, 4257, 4261, 4262, 4263, 4264, 4267, 4268, 4269, 4270, 4271, 4272, 4273, 4274, 4275, 4276, 4277, 4278, 4279, 4280, 4281, 4282, 4283, 4284, 4285, 4286, 4287, 4288, 4289, 4290, 4298, 4301, 4302, 4308, 4313, 4314, 4315, 4316, 4320, 4324, 4326, 4327, 4328, 4329, 4330, 4331, 4332, 4333, 4335, 4336, 4337, 4338, 4340, 4341, 4342, 4343, 4344, 4345, 4346, 4356, 4365, 4366, 4367, 4368, 4369, 4370, 4371, 4372, 4373, 4374, 4376, 4377, 4378, 4379, 4380, 4381, 4382, 4383, 4384, 4385, 4386, 4387, 4388, 4389, 4390, 4394, 4395, 4397, 4398, 4399, 4400, 4404, 4405, 4406, 4407, 4408, 4409, 4411, 4412, 4413, 4420, 4421, 4422, 4423, 4424, 4425, 4429, 4433, 4434, 4436, 4437, 4438, 4439, 4440, 4442, 4452, 4454, 4459, 4460, 4461, 4462, 4463, 4464, 4465, 4466, 4467, 4468, 4469, 4470, 4471, 4472, 4473, 4474, 4476, 4477, 4478, 4479, 4480, 4481, 4482, 4487, 4490, 4491, 4492, 4493, 4494, 4495, 4496, 4497, 4498, 4499, 4500, 4501, 4502, 4503, 4504, 4505, 4506, 4507, 4508, 4509, 4510, 4512, 4513, 4514, 4516, 4517, 4518, 4519, 4522, 4523, 4524, 4526, 4527, 4528, 4530, 4531, 4532, 4533, 4534, 4535, 4537, 4539, 4542, 4543, 4544, 4545, 4547, 4548, 4549, 4550, 4551, 4552, 4553, 4554, 4555, 4556, 4557, 4561, 4563, 4564, 4565, 4566, 4567, 4571, 4572, 4576, 4577, 4578, 4580, 4582, 4583, 4584, 4585, 4586, 4587, 4588, 4590, 4591, 4592, 4593, 4594, 4595, 4596, 4603, 4604, 4605, 4606, 4607, 4608, 4609, 4610, 4611, 4612, 4613, 4614, 4620, 4621, 4623, 4624, 4625, 4626, 4627, 4628, 4629, 4630, 4631, 4632, 4633, 4634, 4635, 4636, 4637, 4638, 4642, 4643, 4644, 4645, 4646, 4647, 4648, 4649, 4650, 4655, 4656, 4661, 4662, 4663, 4664, 4665, 4666, 4667, 4668, 4669, 4670, 4671, 4672, 4673, 4674, 4676, 4677, 4678, 4679, 4688, 4689, 4690, 4691, 4692, 4693, 4695, 4698, 4699, 4700, 4702, 4703, 4704, 4705, 4706, 4707, 4708, 4709, 4710, 4711, 4712, 4713, 4714, 4715, 4716, 4717, 4718, 4719, 4720, 4721, 4722, 4723, 4724, 4725, 4726, 4727, 4728, 4729, 4730, 4731, 4732, 4733, 4734, 4735, 4736, 4737, 4738, 4739, 4740, 4741, 4742, 4743, 4744, 4745, 4746, 4747, 4748, 4749, 4750, 4751, 4752, 4753, 4754, 4755, 4756, 4757, 4758, 4759, 4760, 4761, 4762, 4763, 4764, 4765, 4766, 4767, 4768, 4769, 4770, 4771, 4772, 4773, 4774, 4775, 4776, 4777, 4778, 4779, 4780, 4781, 4782, 4783, 4784, 4785, 4786, 4787, 4788, 4789, 4790, 4791, 4792, 4793, 4794, 4795, 4796, 4797, 4798, 4799, 4800, 4801, 4802, 4803, 4804, 4809, 4810, 4811, 4817, 4830, 4834, 4835, 4836, 4837, 4838, 4839, 4840, 4841, 4842, 4843, 4844, 4845, 4846, 4847, 4848, 4849, 4851, 4852, 4853, 4854, 4855, 4857, 4858, 4859, 4860, 4861, 4862, 4863, 4866, 4867, 4869, 4870, 4871, 4874, 4875, 4876, 4877, 4878, 4879, 4880, 4881, 4882, 4883, 4884, 4885, 4886, 4887, 4888, 4889, 4890, 4891, 4892, 4893, 4894, 4895, 4896, 4897, 4898, 4899, 4900, 4902, 4903, 4904, 4905, 4906, 4907, 4908, 4909, 4910, 4911, 4912, 4913, 4914, 4915, 4916, 4917, 4918, 4919, 4920, 4921, 4922, 4923, 4924, 4925, 4926, 4927, 4928, 4929, 4930, 4931, 4932, 4933, 4935, 4936, 4937, 4939, 4941, 4943, 4944, 4945, 4946, 4949, 4951, 4952, 4953, 4954, 4956, 4957, 4958, 4959, 4960, 4961, 4962, 4963, 4966, 4970, 4971, 4975, 4976, 4977, 4978, 4979, 4981, 4982, 4985, 4986, 4987, 4988, 4989, 4991, 4992, 4993, 4994, 4996, 4998, 4999, 5002, 5003, 5004, 5005, 5006, 5007, 5008, 5009, 5010, 5011, 5012, 5013, 5014, 5015, 5016, 5017, 5018, 5019, 5021, 5022, 5023, 5024, 5025, 5026, 5027, 5028, 5029, 5030, 5031, 5032, 5033, 5038, 5041, 5043, 5044, 5045, 5046, 5050, 5051, 5052, 5053, 5054, 5056, 5058, 5061, 5063, 5067, 5068, 5069, 5070, 5071, 5072, 5073, 5074, 5075, 5076, 5077, 5078, 5079, 5080, 5081, 5082, 5083, 5084) }
+  internal val templates: IntArray by lazy { intArrayOf(2392, 2875, 2687, 2686, 2685, 2907, 2929, 3409, 2650, 420, 2820, 2818, 2714, 2401, 2407, 2822, 5047, 2634, 2919, 2633, 286, 2359, 2824, 2931, 3259, 4220, 2573, 4980, 2623, 2067, 2397, 3743, 2132, 2750, 5048, 2402, 5035, 5040, 3260, 1338, 4240, 4260, 3742, 2591, 2748, 1884, 4235, 2143, 2184, 2190, 4616, 284, 2133, 4558, 3421, 3442, 2090, 2370, 5020, 3739, 454, 2782, 2814, 2815, 3422, 3738, 2783, 3670, 611, 1724, 3747, 1885, 2758, 3750, 2764, 3413, 618, 619, 2800, 3111, 3725, 1672, 2817, 3669, 304, 616, 70, 713, 623, 2369, 4258, 1123, 2511, 3492, 3865, 1244, 2219, 2602, 3414, 2182, 3754, 716, 1776, 1981, 2770, 2779, 2990, 4265, 3416, 3428, 137, 596, 598, 2590, 2745, 1882, 4253, 3062, 612, 2306, 2613, 3911, 5059, 1304, 4252, 5039, 3538, 3675, 3676, 159, 2097, 2099, 2134, 2870, 4414, 2188, 2396, 2541, 5034, 3664, 215, 285, 1278, 2031, 4850, 3533, 3542, 3543, 68, 84, 219, 621, 4652, 3562, 1362, 4347, 3387, 3752, 728, 1025, 1374, 2410, 2502, 2768, 4417, 90, 2409, 2424, 2943, 626, 1670, 1971, 2857, 4546, 3435, 1590, 2118, 2310, 2604, 4598, 3430, 3496, 3546, 652, 1905, 3966, 3195, 3537, 3583, 3647, 3866, 1319, 1883, 2062, 2448, 2739, 3894, 4617, 3449, 3495, 1858, 1880, 3384, 595, 1294, 1348, 1373, 1970, 3524, 3726, 222, 1714, 2771, 2968, 3113, 3181, 3470, 259, 593, 1028, 1381, 1982, 2006, 4173, 3467, 3593, 657, 1344, 1730, 2068, 3189, 3388, 3649, 3668, 712, 1285, 1372, 1384, 1671, 1745, 1912, 2398, 2501, 2603, 3981, 4259, 4483, 3448, 3516, 3662, 651, 701, 1046, 2639, 5060, 3207, 3326, 3729, 109, 185, 608, 723, 1083, 1986, 2066, 2128, 2186, 2434, 2515, 2775, 2811, 2855, 3986, 4529, 4873, 3408, 3479, 3640, 161, 625, 703, 1334, 1335, 1347, 1523, 1673, 2183, 2187, 2280, 2433, 2665, 4228, 4559, 3144, 3236, 3283, 3361, 3575, 3730, 3740, 705, 1185, 1585, 1914, 2275, 2278, 2514, 2776, 2796, 2797, 2965, 2966, 3996, 4016, 4249, 4520, 4856, 4872, 5036, 5042, 3648, 3665, 3771, 1380, 1494, 1597, 1716, 1972, 2454, 2466, 2795, 4192, 4250, 4560, 4651, 3110, 3112, 3127, 3645, 3658, 3824, 725, 1026, 1849, 2155, 2220, 2444, 2791, 2792, 4001, 4247, 4323, 4334, 3314, 3434, 92, 94, 597, 717, 1029, 1352, 1357, 2037, 2350, 2449, 2738, 2790, 2794, 3963, 4599, 4934, 3041, 3042, 3544, 3608, 3751, 95, 1253, 1261, 1355, 1379, 1522, 1596, 1897, 2203, 2235, 2494, 2512, 2766, 3903, 3904, 4246, 4426, 4489, 4938, 5064, 3360, 3399, 3400, 3478, 3634, 300, 601, 620, 702, 1111, 1119, 1177, 1369, 1521, 1639, 1965, 2147, 2153, 2171, 2238, 2464, 2469, 2471, 2698, 2731, 2789, 2967, 2984, 2985, 4217, 4243, 4360, 5037, 5049, 3043, 3197, 3574, 3607, 3776, 212, 587, 592, 607, 719, 722, 908, 992, 1086, 1161, 1336, 1472, 1527, 1718, 1903, 1923, 1943, 1978, 2008, 2089, 2333, 2447, 2513, 2972, 3930, 3982, 4200, 4600, 4618, 4619, 4821, 4983, 3104, 3460, 3655, 3656, 93, 97, 270, 605, 650, 714, 982, 1333, 1720, 1904, 1961, 2131, 2442, 2468, 2470, 2473, 2566, 2704, 2740, 2922, 2934, 4291, 4602, 4833, 3017, 3282, 3315, 3395, 3493, 3612, 3646, 209, 278, 317, 330, 331, 1289, 1354, 1378, 1524, 1525, 1966, 2036, 2061, 2130, 2237, 2265, 2316, 2436, 2451, 2463, 2741, 2744, 2825, 2826, 3901, 4615, 4816, 4990, 3039, 3427, 3431, 3480, 3536, 3691, 3728, 3781, 6, 245, 305, 602, 606, 1049, 1223, 1288, 1356, 1361, 1721, 1722, 1901, 1974, 1977, 2035, 2038, 2169, 2204, 2252, 2435, 2443, 2667, 2773, 2812, 2889, 3898, 3899, 3959, 4216, 4819, 4831, 4832, 5001, 3477, 3599, 3606, 3611, 3673, 3681, 269, 319, 323, 332, 585, 709, 724, 1078, 1162, 1166, 1286, 1287, 1314, 1520, 1723, 1845, 1906, 2026, 2239, 2245, 2406, 2432, 2438, 2465, 2601, 2702, 3964, 4189, 4242, 4305, 4418, 4488, 4701, 4820, 4995, 3090, 3175, 3540, 3541, 3639, 3672, 66, 211, 275, 589, 610, 615, 710, 715, 986, 1077, 1169, 1371, 1726, 1756, 1846, 1851, 1866, 1902, 2065, 2098, 2295, 2313, 2322, 2431, 2485, 2497, 2793, 4227, 3070, 3420, 3605, 3674, 3682, 3727, 91, 208, 289, 321, 324, 325, 350, 599, 609, 711, 857, 907, 1168, 1171, 1254, 1439, 1907, 2022, 2032, 2437, 2446, 2490, 2772, 2810, 2964, 2978, 3936, 4864, 4865, 4868, 4964, 3044, 3075, 3128, 3198, 3256, 3269, 3270, 3433, 3581, 3582, 3654, 3677, 3684, 3735, 111, 187, 191, 192, 213, 322, 328, 329, 353, 376, 582, 584, 591, 627, 729, 853, 979, 1079, 1120, 1149, 1245, 1306, 1316, 1759, 1847, 1848, 1856, 1967, 1968, 1969, 2058, 2271, 2273, 2302, 2314, 2315, 2337, 2405, 2439, 2440, 2496, 2606, 2607, 2690, 2705, 2737, 2742, 2743, 2780, 2827, 2828, 3882, 3900, 3946, 4000, 4245, 4339, 4357, 4375, 4415, 4486, 4521, 4573, 4597, 4658, 4659, 4901, 4984, 5000, 5062, 5066, 3077, 3179, 3203, 3217, 3238, 3419, 3432, 3576, 3580, 3610, 3638, 3769, 3779, 3780, 3792, 3794, 3801, 5, 8, 83, 186, 189, 193, 258, 277, 326, 327, 349, 352, 357, 600, 622, 660, 698, 707, 858, 987, 1050, 1124, 1150, 1151, 1170, 1181, 1241, 1385, 1493, 1662, 1706, 1717, 1867, 1898, 1964, 2010, 2023, 2044, 2267, 2272, 2325, 2331, 2332, 2339, 2450, 2640, 2676, 2850, 3947, 3955, 3985, 4002, 4169, 4204, 4218, 4266, 4306, 4358, 4410, 4574, 4601, 4997, 3100, 3146, 3222, 3223, 3228, 3286, 3570, 3873, 155, 260, 262, 348, 351, 354, 581, 604, 614, 704, 708, 984, 1080, 1383, 1606, 1850, 1942, 2004, 2007, 2323, 2336, 2408, 2455, 2605, 2653, 2895, 3905, 3952, 4018, 4185, 4570, 4657, 4660, 5057, 3476, 3569, 3571, 3579, 3598, 3609, 3777, 3798, 3818, 3874, 96, 197, 204, 205, 206, 243, 244, 347, 583, 588, 603, 617, 624, 628, 629, 693, 718, 727, 985, 988, 1087, 1091, 1163, 1176, 1206, 1351, 1473, 1509, 1701, 1702, 1704, 1739, 1868, 1908, 2250, 2328, 2338, 2445, 2467, 2475, 2986, 4171, 4201, 4202, 4292, 4317, 4355, 4416, 4484, 4540, 4581, 4940, 4965) }
+  internal val argNames: Map<Int, Array<String>> by lazy { mapOf(5 to arrayOf("n"), 6 to arrayOf("n"), 7 to arrayOf("who"), 8 to arrayOf("title"), 66 to arrayOf("state"), 68 to arrayOf("listen"), 70 to arrayOf("listen"), 83 to arrayOf("version"), 84 to arrayOf("count", "plural"), 90 to arrayOf("size", "limit"), 91 to arrayOf("name"), 92 to arrayOf("dir"), 93 to arrayOf("dir"), 94 to arrayOf("name"), 95 to arrayOf("name"), 96 to arrayOf("path"), 97 to arrayOf("path"), 98 to arrayOf("name"), 109 to arrayOf("first"), 111 to arrayOf("n"), 137 to arrayOf("count", "plural"), 155 to arrayOf("tool"), 159 to arrayOf("n"), 161 to arrayOf("name"), 185 to arrayOf("pid", "cmd"), 186 to arrayOf("title", "ago"), 187 to arrayOf("name", "who", "n"), 189 to arrayOf("line"), 191 to arrayOf("n"), 192 to arrayOf("n"), 193 to arrayOf("n"), 197 to arrayOf("name"), 204 to arrayOf("when"), 205 to arrayOf("text", "when"), 206 to arrayOf("when"), 208 to arrayOf("count", "plural"), 209 to arrayOf("count", "plural"), 211 to arrayOf("took", "ago"), 212 to arrayOf("ago"), 213 to arrayOf("kind"), 215 to arrayOf("kind", "code", "why"), 219 to arrayOf("clock"), 222 to arrayOf("build"), 243 to arrayOf("step"), 244 to arrayOf("turn"), 245 to arrayOf("branch"), 258 to arrayOf("step", "total"), 259 to arrayOf("step", "total"), 260 to arrayOf("when"), 262 to arrayOf("tool"), 269 to arrayOf("count", "plural"), 270 to arrayOf("count", "total"), 275 to arrayOf("old", "new"), 277 to arrayOf("version"), 278 to arrayOf("count"), 279 to arrayOf("tag"), 284 to arrayOf("version"), 285 to arrayOf("old", "version"), 286 to arrayOf("version"), 289 to arrayOf("version"), 300 to arrayOf("project", "location"), 304 to arrayOf("account"), 305 to arrayOf("account"), 317 to arrayOf("n"), 319 to arrayOf("n"), 321 to arrayOf("minute"), 322 to arrayOf("time"), 323 to arrayOf("time"), 324 to arrayOf("clock"), 325 to arrayOf("clock", "took"), 326 to arrayOf("clock"), 327 to arrayOf("clock", "took"), 328 to arrayOf("clock"), 329 to arrayOf("clock", "took"), 330 to arrayOf("clock"), 331 to arrayOf("clock", "took"), 332 to arrayOf("clock"), 347 to arrayOf("target"), 348 to arrayOf("target"), 349 to arrayOf("target"), 350 to arrayOf("target"), 351 to arrayOf("target"), 352 to arrayOf("target"), 353 to arrayOf("target"), 354 to arrayOf("target"), 357 to arrayOf("name"), 376 to arrayOf("t"), 420 to arrayOf("minutes", "plural"), 454 to arrayOf("path"), 581 to arrayOf("count"), 582 to arrayOf("count"), 583 to arrayOf("title"), 584 to arrayOf("path"), 585 to arrayOf("path", "error"), 586 to arrayOf("first", "last", "count"), 587 to arrayOf("task", "step"), 588 to arrayOf("count"), 589 to arrayOf("path"), 590 to arrayOf("count", "plural"), 591 to arrayOf("label"), 592 to arrayOf("provider"), 593 to arrayOf("version"), 595 to arrayOf("key"), 596 to arrayOf("device"), 597 to arrayOf("kind", "device"), 598 to arrayOf("status"), 599 to arrayOf("kind", "title"), 600 to arrayOf("layer"), 601 to arrayOf("error"), 602 to arrayOf("page"), 603 to arrayOf("page", "kind", "total"), 604 to arrayOf("reason"), 605 to arrayOf("tag"), 606 to arrayOf("tag"), 607 to arrayOf("title"), 608 to arrayOf("title"), 609 to arrayOf("text", "time"), 610 to arrayOf("kind", "device"), 611 to arrayOf("device"), 612 to arrayOf("device"), 613 to arrayOf("word"), 614 to arrayOf("word", "kind", "count"), 615 to arrayOf("error"), 616 to arrayOf("count"), 617 to arrayOf("time", "relative", "rel", "zoned", "zone"), 618 to arrayOf("zone"), 619 to arrayOf("zone"), 620 to arrayOf("id", "state", "count", "age"), 621 to arrayOf("id"), 622 to arrayOf("name"), 623 to arrayOf("name"), 624 to arrayOf("clock", "count", "plural"), 625 to arrayOf("name"), 626 to arrayOf("name"), 627 to arrayOf("name"), 628 to arrayOf("count"), 629 to arrayOf("count"), 633 to arrayOf("name", "state"), 634 to arrayOf("author", "place", "state"), 635 to arrayOf("title", "state"), 650 to arrayOf("error"), 651 to arrayOf("error"), 652 to arrayOf("host"), 657 to arrayOf("email"), 660 to arrayOf("version"), 662 to arrayOf("first", "last", "count"), 663 to arrayOf("n"), 664 to arrayOf("n"), 693 to arrayOf("ref"), 698 to arrayOf("name"), 699 to arrayOf("name"), 701 to arrayOf("name"), 702 to arrayOf("name"), 703 to arrayOf("action"), 704 to arrayOf("label"), 705 to arrayOf("count", "plural"), 707 to arrayOf("path"), 708 to arrayOf("word", "kind", "count"), 709 to arrayOf("name"), 710 to arrayOf("name"), 711 to arrayOf("name"), 712 to arrayOf("name"), 713 to arrayOf("url"), 714 to arrayOf("count"), 715 to arrayOf("count"), 716 to arrayOf("device"), 717 to arrayOf("device"), 718 to arrayOf("count"), 719 to arrayOf("label"), 720 to arrayOf("label"), 721 to arrayOf("label"), 722 to arrayOf("title"), 723 to arrayOf("title"), 724 to arrayOf("state"), 725 to arrayOf("open", "kind"), 727 to arrayOf("count"), 728 to arrayOf("email"), 729 to arrayOf("email"), 853 to arrayOf("at", "count"), 857 to arrayOf("name"), 858 to arrayOf("name"), 907 to arrayOf("name"), 908 to arrayOf("name"), 979 to arrayOf("count"), 982 to arrayOf("name"), 983 to arrayOf("name", "count"), 984 to arrayOf("label", "n"), 985 to arrayOf("action"), 986 to arrayOf("count", "plural"), 987 to arrayOf("count"), 988 to arrayOf("waiting", "busy", "done"), 992 to arrayOf("count", "plural"), 1025 to arrayOf("name"), 1026 to arrayOf("name"), 1028 to arrayOf("seconds", "long"), 1029 to arrayOf("size", "triangles", "delayed", "waited", "built"), 1030 to arrayOf("size", "delayed", "waited"), 1046 to arrayOf("name"), 1049 to arrayOf("name"), 1050 to arrayOf("count"), 1077 to arrayOf("state"), 1078 to arrayOf("bytes"), 1079 to arrayOf("count"), 1080 to arrayOf("when"), 1081 to arrayOf("state", "name"), 1082 to arrayOf("name", "state"), 1083 to arrayOf("reason", "code"), 1086 to arrayOf("kind", "code"), 1087 to arrayOf("number"), 1091 to arrayOf("x", "y"), 1098 to arrayOf("state"), 1099 to arrayOf("label", "example"), 1111 to arrayOf("text"), 1119 to arrayOf("error"), 1120 to arrayOf("kind", "count"), 1123 to arrayOf("name"), 1124 to arrayOf("n"), 1149 to arrayOf("ago"), 1150 to arrayOf("name"), 1151 to arrayOf("kind", "place", "hub"), 1161 to arrayOf("label"), 1162 to arrayOf("word"), 1163 to arrayOf("count"), 1166 to arrayOf("hub"), 1168 to arrayOf("count"), 1169 to arrayOf("state"), 1170 to arrayOf("label"), 1171 to arrayOf("label"), 1176 to arrayOf("state", "text"), 1177 to arrayOf("text"), 1179 to arrayOf("question"), 1181 to arrayOf("label"), 1185 to arrayOf("title"), 1206 to arrayOf("count"), 1207 to arrayOf("name", "counts"), 1221 to arrayOf("n"), 1223 to arrayOf("mode"), 1240 to arrayOf("first", "last", "total"), 1241 to arrayOf("count"), 1244 to arrayOf("n"), 1245 to arrayOf("who", "name"), 1253 to arrayOf("name"), 1254 to arrayOf("when"), 1261 to arrayOf("why"), 1278 to arrayOf("name"), 1285 to arrayOf("kind"), 1286 to arrayOf("title"), 1287 to arrayOf("title"), 1288 to arrayOf("title"), 1289 to arrayOf("title"), 1294 to arrayOf("name"), 1304 to arrayOf("heard"), 1305 to arrayOf("out", "heard"), 1306 to arrayOf("heard"), 1314 to arrayOf("name", "mb"), 1316 to arrayOf("name"), 1319 to arrayOf("platform"), 1323 to arrayOf("heard", "out", "yes"), 1333 to arrayOf("name", "done", "total", "percent"), 1334 to arrayOf("name", "done"), 1335 to arrayOf("name"), 1336 to arrayOf("error"), 1338 to arrayOf("mb"), 1344 to arrayOf("mb"), 1347 to arrayOf("n"), 1348 to arrayOf("n"), 1351 to arrayOf("n"), 1352 to arrayOf("pct"), 1353 to arrayOf("px"), 1354 to arrayOf("version"), 1355 to arrayOf("tag"), 1356 to arrayOf("tag"), 1357 to arrayOf("hub"), 1361 to arrayOf("tag"), 1362 to arrayOf("tag"), 1369 to arrayOf("when"), 1371 to arrayOf("tag"), 1372 to arrayOf("tag", "when"), 1373 to arrayOf("tag"), 1374 to arrayOf("tag", "when"), 1378 to arrayOf("channel"), 1379 to arrayOf("tag"), 1380 to arrayOf("app", "hub"), 1381 to arrayOf("hub", "app"), 1383 to arrayOf("key"), 1384 to arrayOf("key"), 1385 to arrayOf("why"), 1439 to arrayOf("n"), 1472 to arrayOf("title"), 1473 to arrayOf("note"), 1493 to arrayOf("title"), 1494 to arrayOf("more"), 1509 to arrayOf("bots"), 1520 to arrayOf("name"), 1521 to arrayOf("name", "time"), 1522 to arrayOf("name", "n"), 1523 to arrayOf("name", "time", "n"), 1524 to arrayOf("to"), 1525 to arrayOf("to", "step"), 1527 to arrayOf("note"), 1585 to arrayOf("why"), 1590 to arrayOf("e"), 1596 to arrayOf("max"), 1597 to arrayOf("secs", "max", "mib"), 1606 to arrayOf("path"), 1639 to arrayOf("secs"), 1662 to arrayOf("pct", "scope"), 1670 to arrayOf("n"), 1671 to arrayOf("n"), 1672 to arrayOf("n"), 1673 to arrayOf("n"), 1701 to arrayOf("d", "h"), 1702 to arrayOf("h", "m"), 1703 to arrayOf("m"), 1704 to arrayOf("window", "pct"), 1706 to arrayOf("when"), 1708 to arrayOf("label", "e"), 1710 to arrayOf("from", "to", "total"), 1714 to arrayOf("messages", "lines", "left"), 1716 to arrayOf("pct", "view", "max"), 1717 to arrayOf("pct"), 1718 to arrayOf("done", "total"), 1720 to arrayOf("n"), 1721 to arrayOf("n"), 1722 to arrayOf("time"), 1723 to arrayOf("view", "max"), 1724 to arrayOf("view", "max"), 1726 to arrayOf("more"), 1730 to arrayOf("n"), 1739 to arrayOf("n"), 1745 to arrayOf("page"), 1756 to arrayOf("title"), 1759 to arrayOf("n"), 1776 to arrayOf("name"), 1845 to arrayOf("line"), 1846 to arrayOf("quote"), 1847 to arrayOf("n"), 1848 to arrayOf("n"), 1849 to arrayOf("n"), 1850 to arrayOf("n"), 1851 to arrayOf("n"), 1856 to arrayOf("held"), 1857 to arrayOf("machine"), 1858 to arrayOf("machine"), 1866 to arrayOf("count", "total"), 1867 to arrayOf("count"), 1868 to arrayOf("n"), 1880 to arrayOf("name"), 1882 to arrayOf("n", "c", "total"), 1883 to arrayOf("n", "c"), 1884 to arrayOf("n", "c", "total", "before"), 1885 to arrayOf("n", "c", "before"), 1897 to arrayOf("name"), 1898 to arrayOf("path"), 1901 to arrayOf("file"), 1902 to arrayOf("path", "n"), 1903 to arrayOf("why"), 1904 to arrayOf("n"), 1905 to arrayOf("name"), 1906 to arrayOf("name"), 1907 to arrayOf("name"), 1908 to arrayOf("n"), 1909 to arrayOf("shown", "n"), 1912 to arrayOf("path"), 1914 to arrayOf("n"), 1923 to arrayOf("status"), 1940 to arrayOf("name", "pct"), 1941 to arrayOf("name", "mb"), 1942 to arrayOf("name"), 1943 to arrayOf("name", "why"), 1961 to arrayOf("machine"), 1964 to arrayOf("n"), 1965 to arrayOf("ref"), 1966 to arrayOf("ref", "sheet"), 1967 to arrayOf("name"), 1968 to arrayOf("name"), 1969 to arrayOf("file", "folder"), 1970 to arrayOf("name", "error"), 1971 to arrayOf("name", "status"), 1972 to arrayOf("name", "error"), 1974 to arrayOf("name"), 1977 to arrayOf("code"), 1978 to arrayOf("error"), 1981 to arrayOf("error"), 1982 to arrayOf("error"), 1986 to arrayOf("error"), 2004 to arrayOf("done", "of"), 2006 to arrayOf("why"), 2007 to arrayOf("path"), 2008 to arrayOf("error"), 2009 to arrayOf("secs"), 2010 to arrayOf("secs"), 2022 to arrayOf("code"), 2023 to arrayOf("code"), 2026 to arrayOf("state"), 2031 to arrayOf("hide", "copy", "paste"), 2032 to arrayOf("n"), 2035 to arrayOf("name"), 2036 to arrayOf("name", "folder"), 2037 to arrayOf("name"), 2038 to arrayOf("name", "percent"), 2044 to arrayOf("folder"), 2054 to arrayOf("w", "h"), 2058 to arrayOf("path"), 2061 to arrayOf("why"), 2062 to arrayOf("mb"), 2065 to arrayOf("n"), 2066 to arrayOf("delete", "undo"), 2067 to arrayOf("delete", "undo"), 2068 to arrayOf("undo"), 2089 to arrayOf("what", "secs"), 2090 to arrayOf("file", "holder"), 2097 to arrayOf("what"), 2098 to arrayOf("what"), 2099 to arrayOf("editor", "why"), 2118 to arrayOf("files"), 2128 to arrayOf("why"), 2130 to arrayOf("title"), 2131 to arrayOf("title"), 2132 to arrayOf("version"), 2133 to arrayOf("version", "size", "folder"), 2134 to arrayOf("version", "size", "folder"), 2143 to arrayOf("title"), 2147 to arrayOf("dir", "files"), 2153 to arrayOf("why"), 2155 to arrayOf("code"), 2169 to arrayOf("origin"), 2171 to arrayOf("why"), 2182 to arrayOf("dir"), 2183 to arrayOf("path"), 2184 to arrayOf("home", "other"), 2186 to arrayOf("path"), 2187 to arrayOf("code", "log"), 2188 to arrayOf("log"), 2190 to arrayOf("addr"), 2203 to arrayOf("home"), 2204 to arrayOf("addr"), 2219 to arrayOf("dir", "why"), 2220 to arrayOf("dir"), 2235 to arrayOf("phase"), 2237 to arrayOf("why"), 2238 to arrayOf("what"), 2239 to arrayOf("code"), 2245 to arrayOf("label"), 2250 to arrayOf("kind"), 2252 to arrayOf("project"), 2265 to arrayOf("what"), 2267 to arrayOf("when"), 2271 to arrayOf("n"), 2272 to arrayOf("n"), 2273 to arrayOf("n"), 2275 to arrayOf("agent"), 2276 to arrayOf("effort"), 2278 to arrayOf("n"), 2280 to arrayOf("model"), 2295 to arrayOf("word"), 2302 to arrayOf("more", "step"), 2306 to arrayOf("name"), 2310 to arrayOf("max", "skipped"), 2313 to arrayOf("name"), 2314 to arrayOf("n"), 2315 to arrayOf("name"), 2316 to arrayOf("name"), 2322 to arrayOf("n"), 2323 to arrayOf("name"), 2325 to arrayOf("price"), 2328 to arrayOf("name"), 2330 to arrayOf("name"), 2331 to arrayOf("name"), 2332 to arrayOf("name"), 2333 to arrayOf("text"), 2336 to arrayOf("key"), 2337 to arrayOf("key"), 2338 to arrayOf("pct"), 2339 to arrayOf("when"), 2350 to arrayOf("n", "upstream"), 2359 to arrayOf("mb"), 2369 to arrayOf("path"), 2370 to arrayOf("path"), 2392 to arrayOf("id"), 2396 to arrayOf("model"), 2397 to arrayOf("platform"), 2398 to arrayOf("version"), 2401 to arrayOf("version", "from", "into"), 2402 to arrayOf("version", "from"), 2405 to arrayOf("version", "path"), 2406 to arrayOf("version", "path"), 2407 to arrayOf("version", "pin", "from"), 2408 to arrayOf("path"), 2409 to arrayOf("version", "path"), 2410 to arrayOf("version", "path", "set"), 2424 to arrayOf("turns", "input", "cread", "cwrite", "output", "cost"), 2431 to arrayOf("tool"), 2432 to arrayOf("tool"), 2433 to arrayOf("tool", "word"), 2434 to arrayOf("tool", "word"), 2435 to arrayOf("tool"), 2436 to arrayOf("tool"), 2437 to arrayOf("due"), 2438 to arrayOf("due"), 2439 to arrayOf("due"), 2440 to arrayOf("due"), 2441 to arrayOf("zone"), 2442 to arrayOf("zone"), 2443 to arrayOf("zone"), 2444 to arrayOf("zone"), 2445 to arrayOf("n"), 2446 to arrayOf("who"), 2447 to arrayOf("n", "who"), 2448 to arrayOf("harness"), 2449 to arrayOf("path"), 2450 to arrayOf("path"), 2451 to arrayOf("path"), 2454 to arrayOf("error", "line"), 2455 to arrayOf("label"), 2463 to arrayOf("who"), 2464 to arrayOf("who"), 2465 to arrayOf("label", "left", "when"), 2466 to arrayOf("left"), 2467 to arrayOf("name", "left"), 2468 to arrayOf("used"), 2469 to arrayOf("used", "limit"), 2470 to arrayOf("used", "reason"), 2471 to arrayOf("used", "limit", "reason"), 2473 to arrayOf("provider"), 2474 to arrayOf("used", "window", "pct"), 2475 to arrayOf("rate"), 2485 to arrayOf("n", "r"), 2490 to arrayOf("time", "n"), 2494 to arrayOf("n", "m"), 2496 to arrayOf("pct"), 2497 to arrayOf("cost", "n"), 2501 to arrayOf("in", "out", "cread", "cwrite"), 2502 to arrayOf("in", "out", "cread", "cwrite", "n"), 2511 to arrayOf("turns", "input", "cread", "cwrite", "output"), 2512 to arrayOf("left", "when"), 2513 to arrayOf("left", "when"), 2514 to arrayOf("left", "when"), 2515 to arrayOf("left", "when"), 2541 to arrayOf("n"), 2566 to arrayOf("when"), 2573 to arrayOf("phrase", "now"), 2584 to arrayOf("s"), 2590 to arrayOf("now"), 2591 to arrayOf("now", "nudge", "sent", "undone"), 2601 to arrayOf("e"), 2602 to arrayOf("a", "ams", "b", "bms"), 2603 to arrayOf("ms"), 2604 to arrayOf("e"), 2605 to arrayOf("t"), 2606 to arrayOf("t"), 2607 to arrayOf("t"), 2613 to arrayOf("why"), 2623 to arrayOf("apps"), 2633 to arrayOf("n"), 2634 to arrayOf("n", "k"), 2639 to arrayOf("stt", "conf"), 2640 to arrayOf("words"), 2650 to arrayOf("into"), 2653 to arrayOf("origin"), 2665 to arrayOf("url"), 2667 to arrayOf("url"), 2675 to arrayOf("i", "n"), 2676 to arrayOf("d", "n"), 2685 to arrayOf("version"), 2686 to arrayOf("version"), 2687 to arrayOf("version"), 2690 to arrayOf("path"), 2698 to arrayOf("addr"), 2702 to arrayOf("label"), 2704 to arrayOf("label"), 2705 to arrayOf("label"), 2709 to arrayOf("label"), 2714 to arrayOf("from"), 2731 to arrayOf("done", "of"), 2737 to arrayOf("n"), 2738 to arrayOf("t", "m"), 2739 to arrayOf("m"), 2740 to arrayOf("b", "m"), 2741 to arrayOf("r", "p"), 2742 to arrayOf("n"), 2743 to arrayOf("n"), 2744 to arrayOf("n"), 2745 to arrayOf("n"), 2748 to arrayOf("n"), 2750 to arrayOf("n"), 2758 to arrayOf("n"), 2764 to arrayOf("name", "gb", "path"), 2766 to arrayOf("path", "why"), 2768 to arrayOf("names"), 2770 to arrayOf("why"), 2771 to arrayOf("p", "pn", "t", "tn", "e", "en"), 2772 to arrayOf("done", "total"), 2773 to arrayOf("n"), 2774 to arrayOf("what"), 2775 to arrayOf("n"), 2776 to arrayOf("n"), 2779 to arrayOf("what"), 2780 to arrayOf("n"), 2782 to arrayOf("why", "from"), 2783 to arrayOf("why"), 2789 to arrayOf("path"), 2790 to arrayOf("path", "who"), 2791 to arrayOf("path"), 2792 to arrayOf("path", "cmd"), 2793 to arrayOf("version", "path"), 2794 to arrayOf("version", "path"), 2795 to arrayOf("version", "path", "who"), 2796 to arrayOf("version", "path"), 2797 to arrayOf("version", "path", "cmd"), 2800 to arrayOf("cmd"), 2810 to arrayOf("name", "version", "path"), 2811 to arrayOf("path", "why"), 2812 to arrayOf("name"), 2814 to arrayOf("version", "cli"), 2815 to arrayOf("cli"), 2817 to arrayOf("version"), 2818 to arrayOf("version"), 2820 to arrayOf("version"), 2822 to arrayOf("version"), 2824 to arrayOf("computer"), 2825 to arrayOf("version", "cli"), 2826 to arrayOf("cli"), 2827 to arrayOf("version", "cli"), 2828 to arrayOf("cli"), 2850 to arrayOf("n"), 2855 to arrayOf("code"), 2857 to arrayOf("e"), 2870 to arrayOf("n"), 2875 to arrayOf("channel"), 2889 to arrayOf("project"), 2895 to arrayOf("n"), 2907 to arrayOf("m"), 2919 to arrayOf("m"), 2922 to arrayOf("m"), 2929 to arrayOf("pages"), 2931 to arrayOf("name"), 2934 to arrayOf("name"), 2943 to arrayOf("d", "n"), 2964 to arrayOf("n", "tools"), 2965 to arrayOf("n", "tools", "d"), 2966 to arrayOf("n", "d"), 2967 to arrayOf("n", "what"), 2968 to arrayOf("n", "d", "what"), 2972 to arrayOf("head"), 2978 to arrayOf("name", "path"), 2984 to arrayOf("page", "net", "near"), 2985 to arrayOf("page", "what"), 2986 to arrayOf("ref"), 2990 to arrayOf("page"), 3013 to arrayOf("n"), 3014 to arrayOf("n"), 3015 to arrayOf("n"), 3017 to arrayOf("hub"), 3039 to arrayOf("project"), 3041 to arrayOf("n"), 3042 to arrayOf("n"), 3043 to arrayOf("word"), 3044 to arrayOf("n"), 3062 to arrayOf("name"), 3070 to arrayOf("answer"), 3075 to arrayOf("why"), 3077 to arrayOf("hub"), 3083 to arrayOf("from", "to"), 3090 to arrayOf("project"), 3100 to arrayOf("name"), 3104 to arrayOf("n"), 3110 to arrayOf("code"), 3111 to arrayOf("hub"), 3112 to arrayOf("hub"), 3113 to arrayOf("hub"), 3127 to arrayOf("n"), 3128 to arrayOf("n"), 3144 to arrayOf("status"), 3146 to arrayOf("status"), 3175 to arrayOf("project"), 3179 to arrayOf("code"), 3181 to arrayOf("why"), 3189 to arrayOf("title"), 3195 to arrayOf("title"), 3197 to arrayOf("q"), 3198 to arrayOf("title"), 3203 to arrayOf("room"), 3207 to arrayOf("q"), 3217 to arrayOf("title"), 3222 to arrayOf("n"), 3223 to arrayOf("n"), 3228 to arrayOf("at"), 3236 to arrayOf("size"), 3238 to arrayOf("n", "total"), 3255 to arrayOf("n"), 3256 to arrayOf("what"), 3259 to arrayOf("device"), 3260 to arrayOf("device"), 3269 to arrayOf("word", "count"), 3270 to arrayOf("heard"), 3282 to arrayOf("files"), 3283 to arrayOf("files"), 3286 to arrayOf("name"), 3314 to arrayOf("n"), 3315 to arrayOf("n"), 3326 to arrayOf("n"), 3360 to arrayOf("root"), 3361 to arrayOf("path"), 3384 to arrayOf("name"), 3387 to arrayOf("until"), 3388 to arrayOf("error"), 3395 to arrayOf("url"), 3399 to arrayOf("name"), 3400 to arrayOf("name"), 3408 to arrayOf("code", "hub", "until"), 3409 to arrayOf("url"), 3413 to arrayOf("kinds"), 3414 to arrayOf("address"), 3416 to arrayOf("address"), 3419 to arrayOf("url"), 3420 to arrayOf("url"), 3421 to arrayOf("url"), 3422 to arrayOf("url", "via"), 3427 to arrayOf("name"), 3428 to arrayOf("url", "check", "left"), 3430 to arrayOf("check"), 3431 to arrayOf("address"), 3432 to arrayOf("name"), 3433 to arrayOf("error"), 3434 to arrayOf("url"), 3435 to arrayOf("url"), 3442 to arrayOf("code", "address", "left"), 3448 to arrayOf("name"), 3449 to arrayOf("name"), 3460 to arrayOf("address"), 3467 to arrayOf("code", "body"), 3470 to arrayOf("code", "body"), 3476 to arrayOf("window", "used"), 3477 to arrayOf("window", "used", "when"), 3478 to arrayOf("window", "used"), 3479 to arrayOf("window", "used", "when"), 3480 to arrayOf("provider"), 3492 to arrayOf("label"), 3493 to arrayOf("when"), 3495 to arrayOf("provider"), 3496 to arrayOf("provider", "title", "why"), 3516 to arrayOf("reason"), 3524 to arrayOf("code"), 3533 to arrayOf("name"), 3536 to arrayOf("version"), 3537 to arrayOf("version"), 3538 to arrayOf("version"), 3540 to arrayOf("version"), 3541 to arrayOf("version"), 3542 to arrayOf("version"), 3543 to arrayOf("version", "why"), 3544 to arrayOf("version"), 3546 to arrayOf("code"), 3562 to arrayOf("name"), 3569 to arrayOf("count"), 3570 to arrayOf("title"), 3571 to arrayOf("name"), 3574 to arrayOf("n", "holder"), 3575 to arrayOf("n", "title"), 3576 to arrayOf("title"), 3579 to arrayOf("n"), 3580 to arrayOf("n"), 3581 to arrayOf("n"), 3582 to arrayOf("n"), 3583 to arrayOf("harness", "typed", "type", "remote", "host", "wt", "branch"), 3593 to arrayOf("pid"), 3598 to arrayOf("left"), 3599 to arrayOf("left"), 3605 to arrayOf("left"), 3606 to arrayOf("left"), 3607 to arrayOf("left"), 3608 to arrayOf("left"), 3609 to arrayOf("label", "left"), 3610 to arrayOf("when"), 3611 to arrayOf("used"), 3612 to arrayOf("used", "limit"), 3634 to arrayOf("tracking"), 3638 to arrayOf("total"), 3639 to arrayOf("price"), 3640 to arrayOf("price"), 3645 to arrayOf("n"), 3646 to arrayOf("parts"), 3647 to arrayOf("note"), 3648 to arrayOf("error"), 3649 to arrayOf("error", "parts"), 3654 to arrayOf("state"), 3655 to arrayOf("name", "path"), 3656 to arrayOf("name", "path", "why"), 3658 to arrayOf("code"), 3662 to arrayOf("detail"), 3664 to arrayOf("why"), 3665 to arrayOf("parts"), 3668 to arrayOf("build", "to"), 3669 to arrayOf("build"), 3670 to arrayOf("build", "skip"), 3672 to arrayOf("why"), 3673 to arrayOf("why"), 3674 to arrayOf("build"), 3675 to arrayOf("build", "why"), 3676 to arrayOf("build"), 3677 to arrayOf("build"), 3681 to arrayOf("build"), 3682 to arrayOf("build"), 3684 to arrayOf("build"), 3691 to arrayOf("build"), 3725 to arrayOf("step"), 3726 to arrayOf("p", "pt", "t", "tt", "e", "et"), 3727 to arrayOf("done", "total"), 3728 to arrayOf("n"), 3729 to arrayOf("n"), 3730 to arrayOf("n"), 3735 to arrayOf("n"), 3738 to arrayOf("why"), 3739 to arrayOf("why", "from"), 3740 to arrayOf("error"), 3742 to arrayOf("n"), 3743 to arrayOf("n"), 3747 to arrayOf("n"), 3750 to arrayOf("name", "gb", "path"), 3751 to arrayOf("path", "why"), 3752 to arrayOf("names"), 3754 to arrayOf("why"), 3765 to arrayOf("n", "total"), 3769 to arrayOf("title"), 3771 to arrayOf("n"), 3775 to arrayOf("name"), 3776 to arrayOf("title"), 3777 to arrayOf("note"), 3779 to arrayOf("machine"), 3780 to arrayOf("machines"), 3781 to arrayOf("machine"), 3792 to arrayOf("n"), 3794 to arrayOf("n"), 3798 to arrayOf("name"), 3801 to arrayOf("name"), 3818 to arrayOf("why"), 3824 to arrayOf("project"), 3865 to arrayOf("path"), 3866 to arrayOf("path"), 3868 to arrayOf("have", "total"), 3873 to arrayOf("files", "added", "removed"), 3874 to arrayOf("added", "removed"), 3882 to arrayOf("n"), 3891 to arrayOf("hub"), 3894 to arrayOf("title"), 3898 to arrayOf("project"), 3899 to arrayOf("project"), 3900 to arrayOf("n"), 3901 to arrayOf("hub"), 3903 to arrayOf("n"), 3904 to arrayOf("n"), 3905 to arrayOf("model"), 3911 to arrayOf("name"), 3930 to arrayOf("word"), 3936 to arrayOf("answer"), 3946 to arrayOf("version", "build"), 3947 to arrayOf("hub"), 3952 to arrayOf("name"), 3955 to arrayOf("when", "who", "mark"), 3959 to arrayOf("who"), 3963 to arrayOf("time"), 3964 to arrayOf("address"), 3966 to arrayOf("kind", "name"), 3981 to arrayOf("title"), 3982 to arrayOf("query"), 3985 to arrayOf("room"), 3986 to arrayOf("query"), 3988 to arrayOf("n"), 3989 to arrayOf("n"), 3990 to arrayOf("n"), 3996 to arrayOf("size"), 4000 to arrayOf("n"), 4001 to arrayOf("n"), 4002 to arrayOf("n"), 4016 to arrayOf("status"), 4018 to arrayOf("status"), 4169 to arrayOf("code"), 4171 to arrayOf("n"), 4173 to arrayOf("why"), 4185 to arrayOf("done", "of"), 4189 to arrayOf("thread"), 4192 to arrayOf("n"), 4200 to arrayOf("title"), 4201 to arrayOf("note"), 4202 to arrayOf("label"), 4203 to arrayOf("machine"), 4204 to arrayOf("machine"), 4211 to arrayOf("at", "total"), 4212 to arrayOf("at", "total"), 4216 to arrayOf("machine"), 4217 to arrayOf("machine"), 4218 to arrayOf("machines"), 4220 to arrayOf("device"), 4227 to arrayOf("price"), 4228 to arrayOf("price"), 4235 to arrayOf("home"), 4240 to arrayOf("from"), 4242 to arrayOf("note"), 4243 to arrayOf("note"), 4245 to arrayOf("v"), 4246 to arrayOf("v"), 4247 to arrayOf("v", "who"), 4249 to arrayOf("who"), 4250 to arrayOf("v"), 4252 to arrayOf("v", "cmd"), 4253 to arrayOf("cmd"), 4258 to arrayOf("v", "path"), 4259 to arrayOf("v", "note"), 4260 to arrayOf("v"), 4265 to arrayOf("tool"), 4266 to arrayOf("tool"), 4291 to arrayOf("n", "w"), 4292 to arrayOf("why"), 4293 to arrayOf("state", "why"), 4305 to arrayOf("project"), 4306 to arrayOf("n"), 4317 to arrayOf("why"), 4323 to arrayOf("name"), 4334 to arrayOf("project"), 4339 to arrayOf("n"), 4347 to arrayOf("names"), 4355 to arrayOf("dest"), 4357 to arrayOf("repo"), 4358 to arrayOf("repo"), 4360 to arrayOf("url"), 4375 to arrayOf("time"), 4410 to arrayOf("group"), 4414 to arrayOf("project"), 4415 to arrayOf("n"), 4416 to arrayOf("n"), 4417 to arrayOf("n"), 4418 to arrayOf("n"), 4426 to arrayOf("n"), 4483 to arrayOf("n"), 4484 to arrayOf("n"), 4485 to arrayOf("a", "b"), 4486 to arrayOf("n"), 4488 to arrayOf("parts", "lines"), 4489 to arrayOf("n"), 4520 to arrayOf("what", "project", "fab"), 4521 to arrayOf("rev", "day"), 4529 to arrayOf("n"), 4540 to arrayOf("layer"), 4541 to arrayOf("n"), 4546 to arrayOf("board"), 4558 to arrayOf("others"), 4559 to arrayOf("must", "should", "notes"), 4560 to arrayOf("id", "w"), 4570 to arrayOf("what"), 4573 to arrayOf("why"), 4574 to arrayOf("why"), 4581 to arrayOf("n"), 4597 to arrayOf("price", "n"), 4598 to arrayOf("n", "need"), 4599 to arrayOf("n"), 4600 to arrayOf("n"), 4601 to arrayOf("cost"), 4602 to arrayOf("cost"), 4615 to arrayOf("day", "n"), 4616 to arrayOf("day"), 4617 to arrayOf("cost", "n", "lines"), 4618 to arrayOf("stock", "price"), 4619 to arrayOf("lines"), 4640 to arrayOf("host"), 4651 to arrayOf("n"), 4652 to arrayOf("a", "b"), 4653 to arrayOf("n"), 4654 to arrayOf("n"), 4657 to arrayOf("day"), 4658 to arrayOf("n"), 4659 to arrayOf("n"), 4660 to arrayOf("n"), 4701 to arrayOf("turn"), 4816 to arrayOf("text"), 4819 to arrayOf("repo", "dest"), 4820 to arrayOf("repo", "dest"), 4821 to arrayOf("repo"), 4826 to arrayOf("dir"), 4827 to arrayOf("dir"), 4831 to arrayOf("editor", "job", "secs"), 4832 to arrayOf("editor", "secs"), 4833 to arrayOf("editor"), 4850 to arrayOf("time"), 4856 to arrayOf("status"), 4864 to arrayOf("time"), 4865 to arrayOf("time", "dur"), 4868 to arrayOf("answer"), 4872 to arrayOf("type"), 4873 to arrayOf("max"), 4901 to arrayOf("bytes", "tokens"), 4934 to arrayOf("what"), 4938 to arrayOf("n"), 4940 to arrayOf("n"), 4964 to arrayOf("n"), 4965 to arrayOf("done", "total"), 4973 to arrayOf("v"), 4974 to arrayOf("x", "y"), 4980 to arrayOf("machine"), 4983 to arrayOf("days"), 4984 to arrayOf("warnings"), 4990 to arrayOf("n"), 4995 to arrayOf("n"), 4997 to arrayOf("found", "total", "q"), 5000 to arrayOf("model"), 5001 to arrayOf("model", "conf"), 5020 to arrayOf("version", "mb"), 5034 to arrayOf("v", "path"), 5035 to arrayOf("v", "n", "from"), 5036 to arrayOf("v", "step"), 5037 to arrayOf("why"), 5039 to arrayOf("v", "cli"), 5040 to arrayOf("v", "cli"), 5042 to arrayOf("v"), 5047 to arrayOf("v", "n", "from", "folder"), 5048 to arrayOf("v", "from"), 5049 to arrayOf("done", "total"), 5057 to arrayOf("name"), 5059 to arrayOf("n"), 5060 to arrayOf("step"), 5062 to arrayOf("name"), 5064 to arrayOf("pct"), 5066 to arrayOf("name")) }
 
   val common_cancel: String get() = Tr.s(0)
   val common_delete: String get() = Tr.s(1)
@@ -25438,3567 +25555,3591 @@ object Msg {
   val gpui_no_matches: String get() = Tr.s(1495)
   val gpui_find_in_this_thread: String get() = Tr.s(1496)
   val gpui_find_in_thread: String get() = Tr.s(1497)
-  val gpui_previous_match: String get() = Tr.s(1498)
-  val gpui_next_match: String get() = Tr.s(1499)
-  val gpui_back_to_the_thread: String get() = Tr.s(1500)
-  val gpui_no_steps_reported_yet: String get() = Tr.s(1501)
-  val gpui_unsent: String get() = Tr.s(1502)
-  val gpui_refused: String get() = Tr.s(1503)
-  val gpui_filter_projects_and_threads: String get() = Tr.s(1504)
-  val gpui_type_a_word_said_in2: String get() = Tr.s(1505)
-  val gpui_find_what_was_said_in: String get() = Tr.s(1506)
-  val gpui_find_in_this_thread_enter: String get() = Tr.s(1507)
-  fun gpui_google_bots(bots: Any): String = Tr.f(1508, arrayOf<Any>(bots))
-  val gpui_bots_none: String get() = Tr.s(1509)
-  val gpui_could_not_open_a_local: String get() = Tr.s(1510)
-  val gpui_paste_the_address_the_browser: String get() = Tr.s(1511)
-  val gpui_paste_the_address_the_browser2: String get() = Tr.s(1512)
-  val gpui_confirm_remove: String get() = Tr.s(1513)
-  val gpui_submit: String get() = Tr.s(1514)
-  val gpui_paste_a_pairing_link_pair: String get() = Tr.s(1515)
-  val gpui_hub_address_e_g_https: String get() = Tr.s(1516)
-  val gpui_on_the_hub_s_machine: String get() = Tr.s(1517)
-  val gpui_select_all: String get() = Tr.s(1518)
-  fun home_away(name: Any): String = Tr.f(1519, arrayOf<Any>(name))
-  fun home_away_since(name: Any, time: Any): String = Tr.f(1520, arrayOf<Any>(name, time))
-  fun home_away_queued(name: Any, n: Any): String = Tr.f(1521, arrayOf<Any>(name, n))
-  fun home_away_since_queued(name: Any, time: Any, n: Any): String = Tr.f(1522, arrayOf<Any>(name, time, n))
-  fun home_moving(to: Any): String = Tr.f(1523, arrayOf<Any>(to))
-  fun home_moving_step(to: Any, step: Any): String = Tr.f(1524, arrayOf<Any>(to, step))
-  val home_move_failed: String get() = Tr.s(1525)
-  fun home_move_failed_note(note: Any): String = Tr.f(1526, arrayOf<Any>(note))
-  val home_machine: String get() = Tr.s(1527)
-  val home_move_here: String get() = Tr.s(1528)
-  val gpui_settings_group_general: String get() = Tr.s(1529)
-  val gpui_settings_group_agents: String get() = Tr.s(1530)
-  val gpui_settings_group_workspace: String get() = Tr.s(1531)
-  val gpui_settings_web_ui: String get() = Tr.s(1532)
-  val gpui_settings_shared_files: String get() = Tr.s(1533)
-  val gpui_imp_could_not_keep_this_draft: String get() = Tr.s(1534)
-  val gpui_imp_describe_the_change: String get() = Tr.s(1535)
-  val gpui_imp_describe_the_behavior_in_detail: String get() = Tr.s(1536)
-  val gpui_imp_optional_reproduction_steps_or_other: String get() = Tr.s(1537)
-  val gpui_imp_the_public_issue_text: String get() = Tr.s(1538)
-  val gpui_imp_this_draft_was_already_opened: String get() = Tr.s(1539)
-  val gpui_imp_send_starts_a_new_backplane: String get() = Tr.s(1540)
-  val gpui_imp_review_the_issue_before_opening: String get() = Tr.s(1541)
-  val gpui_imp_the_hub_is_not_reachable: String get() = Tr.s(1542)
-  val gpui_imp_the_hub_could_not_accept: String get() = Tr.s(1543)
-  val gpui_imp_diagnostics_are_unavailable_uncheck_diagnostics: String get() = Tr.s(1544)
-  val gpui_imp_could_not_prepare_the_exact: String get() = Tr.s(1545)
-  val gpui_imp_this_report_is_too_long: String get() = Tr.s(1546)
-  val gpui_imp_review_the_exact_public_text: String get() = Tr.s(1547)
-  val gpui_imp_fill_the_unknown_fields_in: String get() = Tr.s(1548)
-  val gpui_imp_the_hub_did_not_confirm: String get() = Tr.s(1549)
-  val gpui_imp_the_hub_did_not_confirm2: String get() = Tr.s(1550)
-  val gpui_imp_report_agent_started_in_the: String get() = Tr.s(1551)
-  val gpui_imp_the_report_agent_is_still: String get() = Tr.s(1552)
-  val gpui_imp_no_complete_report_is_available: String get() = Tr.s(1553)
-  val gpui_imp_agent_report_loaded_edit_it: String get() = Tr.s(1554)
-  val gpui_imp_the_hub_did_not_confirm3: String get() = Tr.s(1555)
-  val gpui_imp_the_hub_did_not_confirm4: String get() = Tr.s(1556)
-  val gpui_imp_request_sent_opening_the_new: String get() = Tr.s(1557)
-  val gpui_imp_preparing_the_report: String get() = Tr.s(1558)
-  val gpui_imp_starting_the_report_agent: String get() = Tr.s(1559)
-  val gpui_imp_the_report_description_is_too: String get() = Tr.s(1560)
-  val gpui_imp_loading_the_agent_report: String get() = Tr.s(1561)
-  val gpui_imp_this_saved_request_belongs_to: String get() = Tr.s(1562)
-  val gpui_imp_creating_the_backplane_thread: String get() = Tr.s(1563)
-  val gpui_imp_uploading_the_screenshot: String get() = Tr.s(1564)
-  val gpui_imp_uploading_the_selected_recording: String get() = Tr.s(1565)
-  val gpui_imp_this_request_is_too_long: String get() = Tr.s(1566)
-  val gpui_imp_starting_the_request: String get() = Tr.s(1567)
-  val gpui_imp_attachments_need_a_hub_on: String get() = Tr.s(1568)
-  val gpui_imp_the_file_is_gone_choose: String get() = Tr.s(1569)
-  val gpui_imp_this_file_cannot_be_sent: String get() = Tr.s(1570)
-  val gpui_imp_the_image_did_not_arrive: String get() = Tr.s(1571)
-  val gpui_imp_the_file_changed_while_sending: String get() = Tr.s(1572)
-  val gpui_imp_the_image_did_not_arrive2: String get() = Tr.s(1573)
-  fun gpui_imp_why_choose_image(why: Any): String = Tr.f(1574, arrayOf<Any>(why))
-  val gpui_imp_this_window_cannot_be_captured: String get() = Tr.s(1575)
-  val gpui_imp_capturing: String get() = Tr.s(1576)
-  val gpui_imp_screenshot_captured_on_open: String get() = Tr.s(1577)
-  val gpui_imp_screenshot_refreshed: String get() = Tr.s(1578)
-  fun gpui_imp_e_draft_kept(e: Any): String = Tr.f(1579, arrayOf<Any>(e))
-  val gpui_imp_choose_a_png_jpeg_or: String get() = Tr.s(1580)
-  val gpui_imp_choose_an_image_up_to: String get() = Tr.s(1581)
-  val gpui_imp_could_not_keep_this_image: String get() = Tr.s(1582)
-  val gpui_imp_image_refreshed: String get() = Tr.s(1583)
-  val gpui_imp_this_window_cannot_be_recorded: String get() = Tr.s(1584)
-  fun gpui_imp_rec_start(max: Any): String = Tr.f(1585, arrayOf<Any>(max))
-  fun gpui_imp_rec_progress(secs: Any, max: Any, mib: Any): String = Tr.f(1586, arrayOf<Any>(secs, max, mib))
-  val gpui_imp_finishing_recording: String get() = Tr.s(1587)
-  val gpui_imp_could_not_keep_the_recording: String get() = Tr.s(1588)
-  val gpui_imp_recording_saved_locally_play_it: String get() = Tr.s(1589)
-  val gpui_imp_recording_canceled_your_draft_is: String get() = Tr.s(1590)
-  val gpui_imp_could_not_open_it_copy: String get() = Tr.s(1591)
-  val gpui_imp_no_folder_to_save_in: String get() = Tr.s(1592)
-  val gpui_imp_could_not_save_the_file: String get() = Tr.s(1593)
-  val gpui_imp_playing_the_recording_select_it: String get() = Tr.s(1594)
-  fun gpui_imp_saved(path: Any): String = Tr.f(1595, arrayOf<Any>(path))
-  val gpui_imp_exact_issue_text_copied: String get() = Tr.s(1596)
-  val gpui_imp_review_the_report_and_press: String get() = Tr.s(1597)
-  val gpui_imp_confirm_that_the_report_has: String get() = Tr.s(1598)
-  val gpui_imp_github_draft_opened_sign_in: String get() = Tr.s(1599)
-  val gpui_imp_stop_recording: String get() = Tr.s(1600)
-  val gpui_imp_cancel_recording: String get() = Tr.s(1601)
-  val gpui_imp_public_github_issue: String get() = Tr.s(1602)
-  val gpui_imp_internal_implementation_thread: String get() = Tr.s(1603)
-  val gpui_imp_what_would_you_like_to: String get() = Tr.s(1604)
-  val gpui_imp_backplane_source_project: String get() = Tr.s(1605)
-  val gpui_imp_public_on_backplaneworks_backplane_attributed: String get() = Tr.s(1606)
-  val gpui_imp_behavior_evidence: String get() = Tr.s(1607)
-  val gpui_imp_select_a_screenshot_manual_attachment: String get() = Tr.s(1608)
-  val gpui_imp_include_sanitized_diagnostics_in_the: String get() = Tr.s(1609)
-  val gpui_imp_include_additional_details_i_enter: String get() = Tr.s(1610)
-  val gpui_imp_additional_public_details: String get() = Tr.s(1611)
-  val gpui_imp_report_agent_project: String get() = Tr.s(1612)
-  val gpui_imp_write_report_with_agent: String get() = Tr.s(1613)
-  val gpui_imp_load_agent_report: String get() = Tr.s(1614)
-  val gpui_imp_open_report_writing_thread: String get() = Tr.s(1615)
-  val gpui_imp_use_report_template: String get() = Tr.s(1616)
-  val gpui_imp_editable_public_issue_body: String get() = Tr.s(1617)
-  val gpui_imp_copy_issue_text: String get() = Tr.s(1618)
-  val gpui_imp_save_report: String get() = Tr.s(1619)
-  val gpui_imp_save_selected_image: String get() = Tr.s(1620)
-  val gpui_imp_allow_another_github_draft: String get() = Tr.s(1621)
-  val gpui_imp_my_report_has_a_thorough: String get() = Tr.s(1622)
-  val gpui_imp_open_github_draft: String get() = Tr.s(1623)
-  val gpui_imp_capture_again: String get() = Tr.s(1624)
-  val gpui_imp_choose_image: String get() = Tr.s(1625)
-  val gpui_imp_record_screen: String get() = Tr.s(1626)
-  val gpui_imp_video_of_this_window_only: String get() = Tr.s(1627)
-  fun gpui_imp_rec_saved(secs: Any): String = Tr.f(1628, arrayOf<Any>(secs))
-  val gpui_imp_play_recording: String get() = Tr.s(1629)
-  val gpui_imp_discard_recording: String get() = Tr.s(1630)
-  val gpui_imp_select_this_recording_for_the: String get() = Tr.s(1631)
-  val gpui_imp_attach_this_recording_to_the: String get() = Tr.s(1632)
-  val gpui_imp_os_family_and_app_release: String get() = Tr.s(1633)
-  val gpui_imp_choose_an_image_or_preview: String get() = Tr.s(1634)
-  val gpui_imp_choose_the_backplane_source_project: String get() = Tr.s(1635)
-  val gpui_imp_changes_will_be_made_in: String get() = Tr.s(1636)
-  val gpui_imp_improvements: String get() = Tr.s(1637)
-  val gpui_imp_describe_the_change_to_backplane: String get() = Tr.s(1638)
-  val gpui_imp_choose_an_image_or_preview2: String get() = Tr.s(1639)
-  val gpui_imp_choose_the_backplane_source_project2: String get() = Tr.s(1640)
-  val gpui_imp_describe_the_issue_before_continuing: String get() = Tr.s(1641)
-  val gpui_imp_add_a_thorough_behavior_description: String get() = Tr.s(1642)
-  val gpui_imp_choose_a_project_for_the: String get() = Tr.s(1643)
-  val gpui_imp_review_issue: String get() = Tr.s(1644)
-  val gpui_imp_open_thread: String get() = Tr.s(1645)
-  val gpui_acct_connected: String get() = Tr.s(1646)
-  val gpui_acct_signing_in: String get() = Tr.s(1647)
-  val gpui_acct_not_checked: String get() = Tr.s(1648)
-  val gpui_acct_sign_in_expired: String get() = Tr.s(1649)
-  val gpui_acct_not_connected: String get() = Tr.s(1650)
-  fun gpui_acct_used(pct: Any, scope: Any): String = Tr.f(1651, arrayOf<Any>(pct, scope))
-  val gpui_acct_hour5: String get() = Tr.s(1652)
-  val gpui_acct_day7: String get() = Tr.s(1653)
-  val gpui_acct_default_account: String get() = Tr.s(1654)
-  val gpui_acct_cli_login: String get() = Tr.s(1655)
-  val gpui_acct_the_hub_is_not_reachable: String get() = Tr.s(1656)
-  val gpui_acct_paste_the_code_from_claude: String get() = Tr.s(1657)
-  val gpui_acct_the_hub_refused_that: String get() = Tr.s(1658)
-  fun gpui_acct_moved_already(n: Number): String = Tr.f(1659, arrayOf<Any>(n))
-  fun gpui_acct_moved(n: Number): String = Tr.f(1660, arrayOf<Any>(n))
-  fun gpui_acct_moved_running(n: Number): String = Tr.f(1661, arrayOf<Any>(n))
-  fun gpui_acct_moved_failed(n: Number): String = Tr.f(1662, arrayOf<Any>(n))
-  val gpui_acct_account_label_e_g_work: String get() = Tr.s(1663)
-  val gpui_acct_name_the_account_first_e: String get() = Tr.s(1664)
-  val gpui_acct_paste_the_code_claude_shows: String get() = Tr.s(1665)
-  val gpui_acct_generating_the_sign_in_link: String get() = Tr.s(1666)
-  val gpui_acct_open_the_link_sign_in: String get() = Tr.s(1667)
-  val gpui_acct_open_the_link_and_enter: String get() = Tr.s(1668)
-  val gpui_acct_submit_code: String get() = Tr.s(1669)
-  val gpui_acct_checking_the_code_and_your: String get() = Tr.s(1670)
-  val gpui_acct_cancel_sign_in: String get() = Tr.s(1671)
-  val gpui_acct_new_threads: String get() = Tr.s(1672)
-  val gpui_acct_use_for_new_threads: String get() = Tr.s(1673)
-  val gpui_acct_move_all_threads_here: String get() = Tr.s(1674)
-  val gpui_acct_check_sign_in: String get() = Tr.s(1675)
-  val gpui_acct_sign_in_again: String get() = Tr.s(1676)
-  val gpui_acct_confirm_delete: String get() = Tr.s(1677)
-  val gpui_acct_keep: String get() = Tr.s(1678)
-  val gpui_acct_each_account_is_a_separate: String get() = Tr.s(1679)
-  val gpui_acct_the_claude_cli_s_own: String get() = Tr.s(1680)
-  val gpui_acct_used_for_new_threads: String get() = Tr.s(1681)
-  val gpui_acct_available: String get() = Tr.s(1682)
-  val gpui_acct_add_claude_account: String get() = Tr.s(1683)
-  val gpui_acct_add_codex_account: String get() = Tr.s(1684)
-  val gpui_acct_manage_accounts_in_settings: String get() = Tr.s(1685)
-  val gpui_acct_weekly: String get() = Tr.s(1686)
-  val gpui_acct_weekly_opus: String get() = Tr.s(1687)
-  val gpui_acct_weekly_sonnet: String get() = Tr.s(1688)
-  val gpui_acct_now: String get() = Tr.s(1689)
-  fun gpui_acct_in_days(d: Any, h: Any): String = Tr.f(1690, arrayOf<Any>(d, h))
-  fun gpui_acct_in_hours(h: Any, m: Any): String = Tr.f(1691, arrayOf<Any>(h, m))
-  fun gpui_acct_in_minutes(m: Any): String = Tr.f(1692, arrayOf<Any>(m))
-  fun gpui_acct_left(window: Any, pct: Any): String = Tr.f(1693, arrayOf<Any>(window, pct))
-  val gpui_acct_resets_now: String get() = Tr.s(1694)
-  fun gpui_acct_resets(`when`: Any): String = Tr.f(1695, arrayOf<Any>(`when`))
-  val gpui_bots_webhook_name: String get() = Tr.s(1696)
-  fun gpui_bots_eg(label: Any, e: Any): String = Tr.f(1697, arrayOf<Any>(label, e))
-  val gpui_bots_no_tasks_yet_teach_this: String get() = Tr.s(1698)
-  fun gpui_bots_mem_range(from: Any, to: Any, total: Any): String = Tr.f(1699, arrayOf<Any>(from, to, total))
-  val gpui_bots_recall: String get() = Tr.s(1700)
-  val gpui_bots_recall_on: String get() = Tr.s(1701)
-  val gpui_bots_recall_off: String get() = Tr.s(1702)
-  fun gpui_bots_recall_stats(messages: Any, lines: Any, left: Any): String = Tr.f(1703, arrayOf<Any>(messages, lines, left))
-  val gpui_bots_recall_note: String get() = Tr.s(1704)
-  fun gpui_bots_recall_mem_line(pct: Any, view: Any, max: Any): String = Tr.f(1705, arrayOf<Any>(pct, view, max))
-  fun gpui_bots_recall_mem_short(pct: Any): String = Tr.f(1706, arrayOf<Any>(pct))
-  fun gpui_bots_recall_mem_lines(done: Any, total: Any): String = Tr.f(1707, arrayOf<Any>(done, total))
-  val gpui_bots_recall_mem_caught: String get() = Tr.s(1708)
-  fun gpui_bots_recall_mem_behind(n: Number): String = Tr.f(1709, arrayOf<Any>(n))
-  fun gpui_bots_recall_mem_merge(n: Number): String = Tr.f(1710, arrayOf<Any>(n))
-  fun gpui_bots_recall_mem_held(time: Any): String = Tr.f(1711, arrayOf<Any>(time))
-  fun gpui_bots_recall_mem_size(view: Any, max: Any): String = Tr.f(1712, arrayOf<Any>(view, max))
-  fun gpui_bots_recall_mem_cut(view: Any, max: Any): String = Tr.f(1713, arrayOf<Any>(view, max))
-  val gpui_bots_newer: String get() = Tr.s(1714)
-  fun gpui_bots_mem_older(more: Any): String = Tr.f(1715, arrayOf<Any>(more))
-  val gpui_bots_when_hint: String get() = Tr.s(1716)
-  val gpui_bots_nothing_to_report: String get() = Tr.s(1717)
-  val gpui_bots_no_mail: String get() = Tr.s(1718)
-  fun gpui_bots_mail_older(n: Number): String = Tr.f(1719, arrayOf<Any>(n))
-  val gpui_bots_this_space_is_a_web: String get() = Tr.s(1720)
-  val gpui_bots_no_space_yet_the_bot: String get() = Tr.s(1721)
-  val gpui_bots_created: String get() = Tr.s(1722)
-  val gpui_bots_the_hub_refused_it: String get() = Tr.s(1723)
-  val gpui_bots_webhook_made_keep_its_secret: String get() = Tr.s(1724)
-  val gpui_bots_path: String get() = Tr.s(1725)
-  val gpui_bots_token_off: String get() = Tr.s(1726)
-  val gpui_bots_no_hooks: String get() = Tr.s(1727)
-  fun gpui_bots_hook_calls(n: Number): String = Tr.f(1728, arrayOf<Any>(n))
-  val gpui_bots_no_token: String get() = Tr.s(1729)
-  val gpui_bots_no_messages_yet: String get() = Tr.s(1730)
-  val gpui_bots_keep_room: String get() = Tr.s(1731)
-  val gpui_bots_room_closed: String get() = Tr.s(1732)
-  val gpui_bots_connecting_to_the_bot_s: String get() = Tr.s(1733)
-  fun gpui_bots_page_notyet(page: Any): String = Tr.f(1734, arrayOf<Any>(page))
-  val gpui_bots_no_routines: String get() = Tr.s(1735)
-  val gpui_imp_send_to_project: String get() = Tr.s(1736)
-  val gpui_imp_search_projects: String get() = Tr.s(1737)
-  val gpui_imp_choose_a_project_before_sending: String get() = Tr.s(1738)
-  val gpui_imp_choose_a_project_then_retry: String get() = Tr.s(1739)
-  val gpui_imp_the_thread_runs_on_the: String get() = Tr.s(1740)
-  val gpui_imp_ctrl_enter_sends_this_request: String get() = Tr.s(1741)
-  val gpui_imp_send_starts_a_new_thread: String get() = Tr.s(1742)
-  val gpui_imp_creating_the_thread: String get() = Tr.s(1743)
-  val gpui_imp_request_sent_opening_the_new2: String get() = Tr.s(1744)
-  fun gpui_imp_project_chosen(title: Any): String = Tr.f(1745, arrayOf<Any>(title))
-  val gpui_acct_sync_token: String get() = Tr.s(1746)
-  val gpui_acct_sync_token_from_a_linked: String get() = Tr.s(1747)
-  fun gpui_acct_sync_days(n: Number): String = Tr.f(1748, arrayOf<Any>(n))
-  val gpui_acct_renew_the_sync_token: String get() = Tr.s(1749)
-  val gpui_acct_make_a_sync_token: String get() = Tr.s(1750)
-  val gpui_acct_make_the_sync_token: String get() = Tr.s(1751)
-  val gpui_acct_add_claude_sync: String get() = Tr.s(1752)
-  val gpui_acct_signed_out: String get() = Tr.s(1753)
-  val gpui_acct_can_t_tell_who_is: String get() = Tr.s(1754)
-  val gpui_acct_also_added_as: String get() = Tr.s(1755)
-  val gpui_acct_the_same_account_counted_once: String get() = Tr.s(1756)
-  val gpui_acct_claude_code_is_signed_in: String get() = Tr.s(1757)
-  val gpui_acct_codex_is_signed_in_with: String get() = Tr.s(1758)
-  val gpui_acct_codex_did_not_say_who: String get() = Tr.s(1759)
-  val gpui_acct_claude_code_did_not_say: String get() = Tr.s(1760)
-  val gpui_acct_anthropic_api_key_is_set: String get() = Tr.s(1761)
-  val gpui_acct_the_cli_is_signed_in: String get() = Tr.s(1762)
-  val gpui_bots_name_rule: String get() = Tr.s(1763)
-  val gpui_acct_open_the_link_and_sign: String get() = Tr.s(1764)
-  fun bots_delete_removes(name: Any): String = Tr.f(1765, arrayOf<Any>(name))
-  val bots_settings_head: String get() = Tr.s(1766)
-  val gpui_send_the_message: String get() = Tr.s(1767)
-  val gpui_new_line_in_the_message: String get() = Tr.s(1768)
-  val gpui_send_also: String get() = Tr.s(1769)
-  val gpui_put_the_keyboard_in_the: String get() = Tr.s(1770)
-  val gpui_put_the_keyboard_in_the2: String get() = Tr.s(1771)
-  val gpui_agent_model_and_effort: String get() = Tr.s(1772)
-  val gpui_account_of_this_thread_with: String get() = Tr.s(1773)
-  val gpui_pick_account_n_in: String get() = Tr.s(1774)
-  val gpui_previous_row_wraps_round_and: String get() = Tr.s(1775)
-  val gpui_next_row_wraps_round_and: String get() = Tr.s(1776)
-  val gpui_less_effort_or_the_caret: String get() = Tr.s(1777)
-  val gpui_more_effort_or_the_caret: String get() = Tr.s(1778)
-  val gpui_next_column_provider_model_effort: String get() = Tr.s(1779)
-  val gpui_previous_column: String get() = Tr.s(1780)
-  val gpui_take_the_highlighted_row: String get() = Tr.s(1781)
-  val gpui_close_a_popup_dialog_or: String get() = Tr.s(1782)
-  val gpui_commands_jump_to_a_thread: String get() = Tr.s(1783)
-  val gpui_commands_also: String get() = Tr.s(1784)
-  val gpui_fold_or_unfold_the_sidebar: String get() = Tr.s(1785)
-  val gpui_go_to_project_n: String get() = Tr.s(1786)
-  val gpui_go_to_thread_n: String get() = Tr.s(1787)
-  val gpui_previous_thread: String get() = Tr.s(1788)
-  val gpui_next_thread: String get() = Tr.s(1789)
-  val gpui_uberbot_chat: String get() = Tr.s(1790)
-  val gpui_settle_or_unsettle_the_thread: String get() = Tr.s(1791)
-  val gpui_stop_the_running_turn: String get() = Tr.s(1792)
-  val gpui_layer_focus_the_other_layers: String get() = Tr.s(1793)
-  val gpui_undo_the_last_stroke_or: String get() = Tr.s(1794)
-  val gpui_delete_the_selection_or_clear: String get() = Tr.s(1795)
-  val gpui_delete_also: String get() = Tr.s(1796)
-  val gpui_show_or_hide_the_floating: String get() = Tr.s(1797)
-  val gpui_show_the_floating_terminal_also: String get() = Tr.s(1798)
-  val gpui_show_or_hide_the_floating2: String get() = Tr.s(1799)
-  val gpui_leave_the_terminal_put_it: String get() = Tr.s(1800)
-  val gpui_copy_the_terminal_s_selection: String get() = Tr.s(1801)
-  val gpui_paste_into_the_terminal: String get() = Tr.s(1802)
-  val gpui_rail_views_b_board_s: String get() = Tr.s(1803)
-  val gpui_performance_overlay_the_last_few: String get() = Tr.s(1804)
-  val gpui_composer: String get() = Tr.s(1805)
-  val gpui_model_menu_and_popups: String get() = Tr.s(1806)
-  val gpui_model_menu: String get() = Tr.s(1807)
-  val gpui_dialogs: String get() = Tr.s(1808)
-  val gpui_palette: String get() = Tr.s(1809)
-  val gpui_timeline: String get() = Tr.s(1810)
-  val gpui_drawing_pad: String get() = Tr.s(1811)
-  val gpui_window: String get() = Tr.s(1812)
-  val gpui_prev_next_thread: String get() = Tr.s(1813)
-  val gpui_new_thread_here: String get() = Tr.s(1814)
-  val gpui_jump_to_a_thread_here: String get() = Tr.s(1815)
-  val gpui_write_a_message: String get() = Tr.s(1816)
-  val gpui_all_shortcuts: String get() = Tr.s(1817)
-  val gpui_bring_it_into_view: String get() = Tr.s(1818)
-  val gpui_draw_a_sketch_and_attach: String get() = Tr.s(1819)
-  val gpui_fold_the_sidebar: String get() = Tr.s(1820)
-  val gpui_go_to_the_newest_message: String get() = Tr.s(1821)
-  val gpui_jump_or_run_a_command: String get() = Tr.s(1822)
-  val gpui_layers_others_as_they_are: String get() = Tr.s(1823)
-  val gpui_this_thread_orders_the_project: String get() = Tr.s(1824)
-  val gpui_tokens_cost_and_context_the: String get() = Tr.s(1825)
-  val gpui_commands: String get() = Tr.s(1826)
-  val gpui_newer: String get() = Tr.s(1827)
-  val viewer_gerbers_older_board: String get() = Tr.s(1828)
-  val gpui_older: String get() = Tr.s(1829)
-  fun gpui_b_replying_to(line: Any): String = Tr.f(1830, arrayOf<Any>(line))
-  fun gpui_b_in_reply_to(quote: Any): String = Tr.f(1831, arrayOf<Any>(quote))
-  fun gpui_b_settled_shelf(n: Number): String = Tr.f(1832, arrayOf<Any>(n))
-  fun gpui_b_settled_active(n: Number): String = Tr.f(1833, arrayOf<Any>(n))
-  fun gpui_b_history_count(n: Number): String = Tr.f(1834, arrayOf<Any>(n))
-  fun gpui_b_older(n: Number): String = Tr.f(1835, arrayOf<Any>(n))
-  fun gpui_b_older_open(n: Number): String = Tr.f(1836, arrayOf<Any>(n))
-  val gpui_start_a_conversation: String get() = Tr.s(1837)
-  val gpui_order: String get() = Tr.s(1838)
-  val gpui_improvements: String get() = Tr.s(1839)
-  val gpui_nothing_reported_by_the_provider: String get() = Tr.s(1840)
-  fun gpui_b_held_now(held: Any): String = Tr.f(1841, arrayOf<Any>(held))
-  fun gpui_b_on_machine(machine: Any): String = Tr.f(1842, arrayOf<Any>(machine))
-  fun gpui_b_window_on_machine(machine: Any): String = Tr.f(1843, arrayOf<Any>(machine))
-  val gpui_or: String get() = Tr.s(1844)
-  val gpui_bot: String get() = Tr.s(1845)
-  val gpui_thread: String get() = Tr.s(1846)
-  val gpui_project: String get() = Tr.s(1847)
-  val gpui_room: String get() = Tr.s(1848)
-  val gpui_model: String get() = Tr.s(1849)
-  val gpui_before_the_agent_s_edits: String get() = Tr.s(1850)
-  fun gpui_of_changes(count: Number, total: Number): String = Tr.f(1851, arrayOf<Any>(count, total))
-  fun gpui_b_live_changes(count: Number): String = Tr.f(1852, arrayOf<Any>(count))
-  fun gpui_b_steps_count(n: Number): String = Tr.f(1853, arrayOf<Any>(n))
-  val gpui_branch_point: String get() = Tr.s(1854)
-  val gpui_design_change: String get() = Tr.s(1855)
-  val gpui_show_the_old_version: String get() = Tr.s(1856)
-  val gpui_show_the_diff_version: String get() = Tr.s(1857)
-  val gpui_show_the_new_version: String get() = Tr.s(1858)
-  val gpui_loading_the_history: String get() = Tr.s(1859)
-  val gpui_loading_versions: String get() = Tr.s(1860)
-  val gpui_no_versions_in_this_project: String get() = Tr.s(1861)
-  val gpui_no_commit_branch_or_tag: String get() = Tr.s(1862)
-  val gpui_that_version_has_no_copy: String get() = Tr.s(1863)
-  val gpui_this_version_of_the_file: String get() = Tr.s(1864)
-  fun gpui_b_hist_file_missing(name: Any): String = Tr.f(1865, arrayOf<Any>(name))
-  val gpui_the_design_history_could_not: String get() = Tr.s(1866)
-  fun gpui_b_hist_tip_of(n: Number, c: Number, total: Number): String = Tr.f(1867, arrayOf<Any>(n, c, total))
-  fun gpui_b_hist_tip_all(n: Number, c: Number): String = Tr.f(1868, arrayOf<Any>(n, c))
-  fun gpui_b_hist_tip_of_before(n: Number, c: Number, total: Number, before: Number): String = Tr.f(1869, arrayOf<Any>(n, c, total, before))
-  fun gpui_b_hist_tip_all_before(n: Number, c: Number, before: Number): String = Tr.f(1870, arrayOf<Any>(n, c, before))
-  val gpui_download_as_zip: String get() = Tr.s(1871)
-  val gpui_b_files_new: String get() = Tr.s(1872)
-  val gpui_upload: String get() = Tr.s(1873)
-  val gpui_zip: String get() = Tr.s(1874)
-  val gpui_folder_created: String get() = Tr.s(1875)
-  val gpui_renamed: String get() = Tr.s(1876)
-  val gpui_deleted: String get() = Tr.s(1877)
-  val gpui_uploaded: String get() = Tr.s(1878)
-  val gpui_the_hub_refused: String get() = Tr.s(1879)
-  val gpui_a_folder_name_is_one: String get() = Tr.s(1880)
-  val gpui_a_name_is_one_plain: String get() = Tr.s(1881)
-  fun gpui_b_files_no_preview(name: Any): String = Tr.f(1882, arrayOf<Any>(name))
-  fun gpui_b_files_copied(path: Any): String = Tr.f(1883, arrayOf<Any>(path))
-  val gpui_no_hub_address_to_download: String get() = Tr.s(1884)
-  val gpui_this_entry_cannot_be_downloaded: String get() = Tr.s(1885)
-  fun gpui_b_files_downloading(file: Any): String = Tr.f(1886, arrayOf<Any>(file))
-  fun gpui_b_files_saved(path: Any, n: Number): String = Tr.f(1887, arrayOf<Any>(path, n))
-  fun gpui_b_files_download_failed(why: Any): String = Tr.f(1888, arrayOf<Any>(why))
-  fun gpui_b_files_uploading(n: Number): String = Tr.f(1889, arrayOf<Any>(n))
-  fun gpui_b_files_odd_name(name: Any): String = Tr.f(1890, arrayOf<Any>(name))
-  fun gpui_b_files_not_a_file(name: Any): String = Tr.f(1891, arrayOf<Any>(name))
-  fun gpui_b_files_too_big(name: Any): String = Tr.f(1892, arrayOf<Any>(name))
-  fun gpui_b_files_items(n: Number): String = Tr.f(1893, arrayOf<Any>(n))
-  fun gpui_b_files_of(shown: Number, n: Number): String = Tr.f(1894, arrayOf<Any>(shown, n))
-  val gpui_new_folder: String get() = Tr.s(1895)
-  val gpui_rename_to: String get() = Tr.s(1896)
-  fun gpui_b_files_delete_ask(path: Any): String = Tr.f(1897, arrayOf<Any>(path))
-  val gpui_keep: String get() = Tr.s(1898)
-  fun gpui_b_files_more(n: Number): String = Tr.f(1899, arrayOf<Any>(n))
-  val gpui_empty_folder_drop_files_here: String get() = Tr.s(1900)
-  val gpui_nothing_matches: String get() = Tr.s(1901)
-  val gpui_could_not_load_the_file: String get() = Tr.s(1902)
-  val gpui_drawing_the_page: String get() = Tr.s(1903)
-  val gpui_filter_this_folder: String get() = Tr.s(1904)
-  val gpui_no_hub_address: String get() = Tr.s(1905)
-  val gpui_not_a_hub_path: String get() = Tr.s(1906)
-  val gpui_the_hub_gave_no_answer: String get() = Tr.s(1907)
-  fun gpui_the_hub_answered(status: Any): String = Tr.f(1908, arrayOf<Any>(status))
-  val gpui_fold_the_project_s_threads: String get() = Tr.s(1909)
-  val gpui_unfold_the_project_s_threads: String get() = Tr.s(1910)
-  val gpui_open_in_kicad_embedded: String get() = Tr.s(1911)
-  val gpui_that_file_does_not_open: String get() = Tr.s(1912)
-  val gpui_open_a_thread_first_that: String get() = Tr.s(1913)
-  val gpui_gerbers_open_on_their_project: String get() = Tr.s(1914)
-  val gpui_that_kicad_project_has_no: String get() = Tr.s(1915)
-  val gpui_that_file_is_not_on: String get() = Tr.s(1916)
-  val gpui_quit_backplane: String get() = Tr.s(1917)
-  val gpui_quit_backplane_on_a_mac: String get() = Tr.s(1918)
-  val gpui_hide_backplane: String get() = Tr.s(1919)
-  val gpui_hide_others: String get() = Tr.s(1920)
-  val gpui_show_all: String get() = Tr.s(1921)
-  val gpui_close_window: String get() = Tr.s(1922)
-  val gpui_close_the_window_on_a: String get() = Tr.s(1923)
-  val gpui_hide_backplane_on_a_mac: String get() = Tr.s(1924)
-  fun gpui_dl_percent(name: Any, pct: Any): String = Tr.f(1925, arrayOf<Any>(name, pct))
-  fun gpui_dl_mb(name: Any, mb: Any): String = Tr.f(1926, arrayOf<Any>(name, mb))
-  fun gpui_dl_saved(name: Any): String = Tr.f(1927, arrayOf<Any>(name))
-  fun gpui_dl_failed(name: Any, why: Any): String = Tr.f(1928, arrayOf<Any>(name, why))
-  val gpui_dl_manufacturing: String get() = Tr.s(1929)
-  val gpui_dl_the_download_ended_early: String get() = Tr.s(1930)
-  val gpui_dl_the_hub_closed_the_connection: String get() = Tr.s(1931)
-  val gpui_dl_that_file_is_not_there: String get() = Tr.s(1932)
-  val gpui_dl_the_hub_does_not_share: String get() = Tr.s(1933)
-  val gpui_dl_the_hub_kept_changing_the: String get() = Tr.s(1934)
-  val gpui_dl_the_hub_sent_the_file: String get() = Tr.s(1935)
-  val gpui_c_commit: String get() = Tr.s(1936)
-  val gpui_c_diff_cut: String get() = Tr.s(1937)
-  val gpui_c_loading_board: String get() = Tr.s(1938)
-  val gpui_c_loading_schematic: String get() = Tr.s(1939)
-  val gpui_c_loading_gerbers: String get() = Tr.s(1940)
-  val gpui_c_opening: String get() = Tr.s(1941)
-  val gpui_c_open_it: String get() = Tr.s(1942)
-  val gpui_c_bring_into_view: String get() = Tr.s(1943)
-  val gpui_c_browser_needs_hub: String get() = Tr.s(1944)
-  val gpui_c_piece: String get() = Tr.s(1945)
-  fun gpui_c_kicad_open_on(machine: Any): String = Tr.f(1946, arrayOf<Any>(machine))
-  val gpui_c_altium_open: String get() = Tr.s(1947)
-  val gpui_c_altium_open_tip: String get() = Tr.s(1948)
-  fun gpui_c_sheets_count(n: Any): String = Tr.f(1949, arrayOf<Any>(n))
-  fun gpui_c_probe_on_top(ref: Any): String = Tr.f(1950, arrayOf<Any>(ref))
-  fun gpui_c_probe_on_sheet(ref: Any, sheet: Any): String = Tr.f(1951, arrayOf<Any>(ref, sheet))
-  fun gpui_c_split_hide(name: Any): String = Tr.f(1952, arrayOf<Any>(name))
-  fun gpui_c_split_show(name: Any): String = Tr.f(1953, arrayOf<Any>(name))
-  fun gpui_c_dl_saved(file: Any, folder: Any): String = Tr.f(1954, arrayOf<Any>(file, folder))
-  fun gpui_c_dl_notsaved(name: Any, error: Any): String = Tr.f(1955, arrayOf<Any>(name, error))
-  fun gpui_c_dl_hub(name: Any, status: Any): String = Tr.f(1956, arrayOf<Any>(name, status))
-  fun gpui_c_dl_failed(name: Any, error: Any): String = Tr.f(1957, arrayOf<Any>(name, error))
-  val gpui_c_dl_nofile: String get() = Tr.s(1958)
-  fun gpui_c_dl_busy(name: Any): String = Tr.f(1959, arrayOf<Any>(name))
-  val gpui_c_br_notjpeg: String get() = Tr.s(1960)
-  val gpui_c_br_opening: String get() = Tr.s(1961)
-  fun gpui_c_br_hub_answered(code: Any): String = Tr.f(1962, arrayOf<Any>(code))
-  fun gpui_c_br_hub_unreachable(error: Any): String = Tr.f(1963, arrayOf<Any>(error))
-  val gpui_c_br_https: String get() = Tr.s(1964)
-  val gpui_c_br_waiting: String get() = Tr.s(1965)
-  fun gpui_c_br_cef_note(error: Any): String = Tr.f(1966, arrayOf<Any>(error))
-  fun gpui_c_br_cef_banner(error: Any): String = Tr.f(1967, arrayOf<Any>(error))
-  val gpui_c_br_nohelper: String get() = Tr.s(1968)
-  val gpui_c_br_nochrome: String get() = Tr.s(1969)
-  val gpui_c_br_retry_hint: String get() = Tr.s(1970)
-  fun gpui_c_br_couldnot(error: Any): String = Tr.f(1971, arrayOf<Any>(error))
-  val gpui_c_br_slow: String get() = Tr.s(1972)
-  val gpui_c_br_slow_hint: String get() = Tr.s(1973)
-  val gpui_c_br_starting: String get() = Tr.s(1974)
-  val gpui_c_br_newtab: String get() = Tr.s(1975)
-  val gpui_c_br_address: String get() = Tr.s(1976)
-  val gpui_c_solid_bad_model: String get() = Tr.s(1977)
-  val gpui_c_solid_incomplete_model: String get() = Tr.s(1978)
-  val gpui_c_solid_unexpected_model: String get() = Tr.s(1979)
-  val gpui_c_solid_bad_part: String get() = Tr.s(1980)
-  val gpui_c_solid_bad_place: String get() = Tr.s(1981)
-  val gpui_c_solid_too_many: String get() = Tr.s(1982)
-  val gpui_c_solid_incomplete_part: String get() = Tr.s(1983)
-  val gpui_c_solid_unexpected_part: String get() = Tr.s(1984)
-  val gpui_c_solid_part_nomodel: String get() = Tr.s(1985)
-  val gpui_c_solid_no_count: String get() = Tr.s(1986)
-  val gpui_c_solid_drawing: String get() = Tr.s(1987)
-  val gpui_c_solid_building: String get() = Tr.s(1988)
-  fun gpui_c_solid_parts(done: Any, of: Any): String = Tr.f(1989, arrayOf<Any>(done, of))
-  val gpui_c_solid_none: String get() = Tr.s(1990)
-  fun gpui_c_solid_previous(why: Any): String = Tr.f(1991, arrayOf<Any>(why))
-  fun gpui_c_solid_saved(path: Any): String = Tr.f(1992, arrayOf<Any>(path))
-  fun gpui_c_solid_snap_failed(error: Any): String = Tr.f(1993, arrayOf<Any>(error))
-  fun gpui_c_secs(secs: Any): String = Tr.f(1994, arrayOf<Any>(secs))
-  fun gpui_c_about_secs(secs: Any): String = Tr.f(1995, arrayOf<Any>(secs))
-  val viewer_c_view_iso: String get() = Tr.s(1996)
-  val viewer_c_view_top: String get() = Tr.s(1997)
-  val viewer_c_view_bottom: String get() = Tr.s(1998)
-  val viewer_c_view_front: String get() = Tr.s(1999)
-  val viewer_c_view_right: String get() = Tr.s(2000)
-  val viewer_c_view_back: String get() = Tr.s(2001)
-  val viewer_c_view_left: String get() = Tr.s(2002)
-  val viewer_c_view_snap: String get() = Tr.s(2003)
-  val gpui_c_term_running: String get() = Tr.s(2004)
-  val gpui_c_term_stopped: String get() = Tr.s(2005)
-  val gpui_c_term_failed: String get() = Tr.s(2006)
-  fun gpui_c_term_done(code: Any): String = Tr.f(2007, arrayOf<Any>(code))
-  fun gpui_c_term_exited(code: Any): String = Tr.f(2008, arrayOf<Any>(code))
-  val gpui_c_term_nothread: String get() = Tr.s(2009)
-  val gpui_c_term_esc: String get() = Tr.s(2010)
-  fun gpui_c_term_inpanel(state: Any): String = Tr.f(2011, arrayOf<Any>(state))
-  val gpui_c_term_again: String get() = Tr.s(2012)
-  val gpui_c_term_collapse: String get() = Tr.s(2013)
-  val gpui_c_term_expand: String get() = Tr.s(2014)
-  val gpui_c_term_pop: String get() = Tr.s(2015)
-  fun gpui_c_term_hint(hide: Any, copy: Any, paste: Any): String = Tr.f(2016, arrayOf<Any>(hide, copy, paste))
-  fun gpui_c_term_back(n: Number): String = Tr.f(2017, arrayOf<Any>(n))
-  val gpui_c_term_run: String get() = Tr.s(2018)
-  val gpui_c_term_busy: String get() = Tr.s(2019)
-  fun gpui_c_cef_downloading(name: Any): String = Tr.f(2020, arrayOf<Any>(name))
-  fun gpui_c_cef_downloaded(name: Any, folder: Any): String = Tr.f(2021, arrayOf<Any>(name, folder))
-  fun gpui_c_cef_stopped(name: Any): String = Tr.f(2022, arrayOf<Any>(name))
-  fun gpui_c_cef_percent(name: Any, percent: Any): String = Tr.f(2023, arrayOf<Any>(name, percent))
-  val gpui_c_cef_refused: String get() = Tr.s(2024)
-  val gpui_c_layers_tip: String get() = Tr.s(2025)
-  val gpui_c_boards_find_ph: String get() = Tr.s(2026)
-  val gpui_c_boards_select: String get() = Tr.s(2027)
-  val gpui_c_boards_find: String get() = Tr.s(2028)
-  fun gpui_c_boards_folder(folder: Any): String = Tr.f(2029, arrayOf<Any>(folder))
-  val gpui_c_boards_default: String get() = Tr.s(2030)
-  val gpui_c_boards_none: String get() = Tr.s(2031)
-  val gpui_c_cap_badffmpeg: String get() = Tr.s(2032)
-  val gpui_c_cap_noffmpeg: String get() = Tr.s(2033)
-  val gpui_c_cap_nox11: String get() = Tr.s(2034)
-  val gpui_c_cap_nostart: String get() = Tr.s(2035)
-  val gpui_c_cap_failed: String get() = Tr.s(2036)
-  val gpui_c_cap_recfailed: String get() = Tr.s(2037)
-  val gpui_c_image_close: String get() = Tr.s(2038)
-  fun gpui_c_image_size(w: Any, h: Any): String = Tr.f(2039, arrayOf<Any>(w, h))
-  val gpui_c_image_fit: String get() = Tr.s(2040)
-  val gpui_c_image_loading_full: String get() = Tr.s(2041)
-  val gpui_c_image_full_failed: String get() = Tr.s(2042)
-  fun gpui_c_image_saved(path: Any): String = Tr.f(2043, arrayOf<Any>(path))
-  val gpui_c_image_err_nohub: String get() = Tr.s(2044)
-  val gpui_c_image_err_unsent: String get() = Tr.s(2045)
-  fun gpui_c_image_save_failed(why: Any): String = Tr.f(2046, arrayOf<Any>(why))
-  fun gpui_c_plot_toobig(mb: Any): String = Tr.f(2047, arrayOf<Any>(mb))
-  val gpui_c_plot_unread: String get() = Tr.s(2048)
-  val gpui_c_plot_badref: String get() = Tr.s(2049)
-  fun gpui_c_md_more(n: Number): String = Tr.f(2050, arrayOf<Any>(n))
-  fun gpui_c_pad_hint_pen(delete: Any, undo: Any): String = Tr.f(2051, arrayOf<Any>(delete, undo))
-  fun gpui_c_pad_hint_box(delete: Any, undo: Any): String = Tr.f(2052, arrayOf<Any>(delete, undo))
-  fun gpui_c_pad_hint_eraser(undo: Any): String = Tr.f(2053, arrayOf<Any>(undo))
-  val gpui_c_pad_pen: String get() = Tr.s(2054)
-  val gpui_c_pad_box: String get() = Tr.s(2055)
-  val gpui_c_pad_eraser: String get() = Tr.s(2056)
-  val gpui_c_kicad_kicad_could_not_start: String get() = Tr.s(2057)
-  val gpui_c_kicad_try_again: String get() = Tr.s(2058)
-  val gpui_c_kicad_open_anyway: String get() = Tr.s(2059)
-  val gpui_c_kicad_cancel: String get() = Tr.s(2060)
-  val gpui_c_kicad_open_the_app_instead: String get() = Tr.s(2061)
-  val gpui_c_kicad_mac_full_screen: String get() = Tr.s(2062)
-  val gpui_c_kicad_mac_prompt: String get() = Tr.s(2063)
-  val gpui_c_kicad_mac_buried: String get() = Tr.s(2064)
-  val gpui_c_kicad_recover_prompt: String get() = Tr.s(2065)
-  val gpui_c_kicad_stock_tip: String get() = Tr.s(2066)
-  val gpui_c_kicad_kicad_is_not_responding: String get() = Tr.s(2067)
-  val gpui_c_kicad_kicad_was_closed: String get() = Tr.s(2068)
-  val gpui_c_kicad_closed_kept: String get() = Tr.s(2069)
-  val gpui_c_kicad_closed_lost: String get() = Tr.s(2070)
-  val gpui_c_kicad_closed_agent: String get() = Tr.s(2071)
-  val gpui_c_kicad_open_again: String get() = Tr.s(2072)
-  val gpui_c_kicad_starting_kicad: String get() = Tr.s(2073)
-  fun gpui_c_kicad_starting_slow(what: Any, secs: Any): String = Tr.f(2074, arrayOf<Any>(what, secs))
-  fun gpui_c_kicad_lock_ask(file: Any, holder: Any): String = Tr.f(2075, arrayOf<Any>(file, holder))
-  val gpui_c_kicad_phase_handover: String get() = Tr.s(2076)
-  val gpui_c_kicad_phase_none: String get() = Tr.s(2077)
-  val gpui_c_kicad_phase_spawned: String get() = Tr.s(2078)
-  val gpui_c_kicad_phase_socket: String get() = Tr.s(2079)
-  val gpui_c_kicad_phase_answering: String get() = Tr.s(2080)
-  val gpui_c_kicad_phase_show: String get() = Tr.s(2081)
-  fun gpui_c_kicad_task_wait(what: Any): String = Tr.f(2082, arrayOf<Any>(what))
-  fun gpui_c_kicad_notice(what: Any): String = Tr.f(2083, arrayOf<Any>(what))
-  fun gpui_c_kicad_firstshow(editor: Any, why: Any): String = Tr.f(2084, arrayOf<Any>(editor, why))
-  val gpui_c_kicad_this_window_cannot_hold_another: String get() = Tr.s(2085)
-  val gpui_c_kicad_no_x11_connection: String get() = Tr.s(2086)
-  val gpui_c_kicad_could_not_create_container: String get() = Tr.s(2087)
-  val gpui_c_kicad_the_embedded_editor_needs_backplane: String get() = Tr.s(2088)
-  val gpui_c_kicad_back_to_backplane_s_viewer: String get() = Tr.s(2089)
-  val gpui_c_kicad_edit_in_the_real_kicad: String get() = Tr.s(2090)
-  val gpui_c_kicad_view: String get() = Tr.s(2091)
-  val gpui_c_kicad_symbols: String get() = Tr.s(2092)
-  val gpui_c_kicad_footprints: String get() = Tr.s(2093)
-  val gpui_c_kicad_gerbers: String get() = Tr.s(2094)
-  val gpui_c_kicad_full_size: String get() = Tr.s(2095)
-  val gpui_c_kicad_exit_full_size: String get() = Tr.s(2096)
-  val gpui_c_kicad_the_editor_takes_the_sidebar: String get() = Tr.s(2097)
-  val gpui_c_kicad_pop_back_in: String get() = Tr.s(2098)
-  val gpui_c_kicad_back_into_backplane_s_pane: String get() = Tr.s(2099)
-  val gpui_c_kicad_the_editor_in_a_window: String get() = Tr.s(2100)
-  val gpui_c_kicad_kicad_is_open_in_its: String get() = Tr.s(2101)
-  val gpui_c_kicad_the_editor_s_window_could: String get() = Tr.s(2102)
-  fun gpui_c_kicad_changed(files: Any): String = Tr.f(2103, arrayOf<Any>(files))
-  val gpui_c_kicad_keep_yours: String get() = Tr.s(2104)
-  val gpui_c_kicad_reload_lose_your_edits: String get() = Tr.s(2105)
-  val gpui_c_kicad_a_comment_from_kicad_needs: String get() = Tr.s(2106)
-  val gpui_kcomment_nothing: String get() = Tr.s(2107)
-  val gpui_kcomment_no_capture: String get() = Tr.s(2108)
-  val gpui_kcomment_reading: String get() = Tr.s(2109)
-  val gpui_kcomment_waiting: String get() = Tr.s(2110)
-  val gpui_kcomment_timeout: String get() = Tr.s(2111)
-  val gpui_kcomment_hint: String get() = Tr.s(2112)
-  fun gpui_kcomment_not_posted(why: Any): String = Tr.f(2113, arrayOf<Any>(why))
-  val gpui_keys_kcomment: String get() = Tr.s(2114)
-  fun gpui_c_kicad_dialog(title: Any): String = Tr.f(2115, arrayOf<Any>(title))
-  fun gpui_c_kicad_asking(title: Any): String = Tr.f(2116, arrayOf<Any>(title))
-  fun gpui_kicad_update_installed(version: Any): String = Tr.f(2117, arrayOf<Any>(version))
-  fun gpui_kicad_update_missing(version: Any, size: Any, folder: Any): String = Tr.f(2118, arrayOf<Any>(version, size, folder))
-  fun gpui_kicad_update_missing_admin(version: Any, size: Any, folder: Any): String = Tr.f(2119, arrayOf<Any>(version, size, folder))
-  val gpui_kicad_update_install: String get() = Tr.s(2120)
-  val gpui_kicad_update_set_path: String get() = Tr.s(2121)
-  val gpui_c_kicad_missing_row: String get() = Tr.s(2122)
-  val gpui_c_kicad_missing_edit: String get() = Tr.s(2123)
-  val gpui_c_kicad_full_screen: String get() = Tr.s(2124)
-  val gpui_c_kicad_exit_full_screen: String get() = Tr.s(2125)
-  val gpui_c_kicad_the_editor_takes_the_whole: String get() = Tr.s(2126)
-  val gpui_c_kicad_closing: String get() = Tr.s(2127)
-  fun gpui_c_kicad_closing_ask(title: Any): String = Tr.f(2128, arrayOf<Any>(title))
-  val gpui_c_solid_load_big: String get() = Tr.s(2129)
-  val gpui_c_solid_loading_big: String get() = Tr.s(2130)
-  val gpui_c_solid_big_next: String get() = Tr.s(2131)
-  fun gpui_assets_missing(dir: Any, files: Any): String = Tr.f(2132, arrayOf<Any>(dir, files))
-  val gpui_connecting: String get() = Tr.s(2133)
-  val gpui_connected: String get() = Tr.s(2134)
-  val gpui_disconnected: String get() = Tr.s(2135)
-  val gpui_hub_is_opening_its_log: String get() = Tr.s(2136)
-  val gpui_hub_disconnected_draft_kept_reconnecting: String get() = Tr.s(2137)
-  fun gpui_hub_refused_it(why: Any): String = Tr.f(2138, arrayOf<Any>(why))
-  val gpui_that_is_not_on_this: String get() = Tr.s(2139)
-  fun gpui_hub_view_refused(code: Any): String = Tr.f(2140, arrayOf<Any>(code))
-  val gpui_no_reason_given: String get() = Tr.s(2141)
-  val gpui_this_invitation_names_only_its: String get() = Tr.s(2142)
-  val gpui_that_is_not_a_pairing: String get() = Tr.s(2143)
-  val gpui_paste_a_pairing_link_or: String get() = Tr.s(2144)
-  val gpui_check_the_hub_address_and: String get() = Tr.s(2145)
-  val gpui_that_code_is_not_correct: String get() = Tr.s(2146)
-  val gpui_this_invitation_expired_create_another: String get() = Tr.s(2147)
-  val gpui_this_invitation_has_already_been: String get() = Tr.s(2148)
-  val gpui_this_invitation_was_revoked_create: String get() = Tr.s(2149)
-  val gpui_too_many_attempts_wait_a: String get() = Tr.s(2150)
-  val gpui_this_hub_has_too_many: String get() = Tr.s(2151)
-  val gpui_the_hub_could_not_save: String get() = Tr.s(2152)
-  val gpui_the_hub_could_not_be: String get() = Tr.s(2153)
-  fun gpui_pair_pairing_with(origin: Any): String = Tr.f(2154, arrayOf<Any>(origin))
-  val gpui_this_pairing_could_not_be: String get() = Tr.s(2155)
-  fun gpui_could_not_restart(why: Any): String = Tr.f(2156, arrayOf<Any>(why))
-  val gpui_pair_with_this_hub: String get() = Tr.s(2157)
-  val gpui_a_link_opened_this_pair: String get() = Tr.s(2158)
-  val gpui_re_pair_this_device: String get() = Tr.s(2159)
-  val gpui_add_a_hub: String get() = Tr.s(2160)
-  val gpui_connect_to_your_backplane_hub: String get() = Tr.s(2161)
-  val gpui_this_device_was_revoked_make: String get() = Tr.s(2162)
-  val gpui_on_a_paired_machine_settings: String get() = Tr.s(2163)
-  val gpui_or_the_hub_s_address: String get() = Tr.s(2164)
-  val gpui_devices: String get() = Tr.s(2165)
-  val gpui_add_a_device: String get() = Tr.s(2166)
-  fun gpui_launch_hub_missing(dir: Any): String = Tr.f(2167, arrayOf<Any>(dir))
-  fun gpui_launch_could_not_make(path: Any): String = Tr.f(2168, arrayOf<Any>(path))
-  fun gpui_launch_elsewhere(home: Any, other: Any): String = Tr.f(2169, arrayOf<Any>(home, other))
-  val gpui_no_free_port: String get() = Tr.s(2170)
-  fun gpui_launch_could_not_start(path: Any): String = Tr.f(2171, arrayOf<Any>(path))
-  fun gpui_launch_stopped(code: Any, log: Any): String = Tr.f(2172, arrayOf<Any>(code, log))
-  fun gpui_launch_no_answer(log: Any): String = Tr.f(2173, arrayOf<Any>(log))
-  val gpui_that_address_did_not_answer: String get() = Tr.s(2174)
-  fun gpui_launch_unreachable(addr: Any): String = Tr.f(2175, arrayOf<Any>(addr))
-  val gpui_no_folder_for_this_device: String get() = Tr.s(2176)
-  val gpui_no_folder_for_this_program: String get() = Tr.s(2177)
-  val gpui_choose_a_folder: String get() = Tr.s(2178)
-  val gpui_give_the_full_path_starting: String get() = Tr.s(2179)
-  val gpui_that_folder_belongs_to_backplane: String get() = Tr.s(2180)
-  val gpui_that_code_was_used_already: String get() = Tr.s(2181)
-  val gpui_that_code_expired_after_ten: String get() = Tr.s(2182)
-  val gpui_that_code_was_revoked_make: String get() = Tr.s(2183)
-  val gpui_too_many_tries_wait_a: String get() = Tr.s(2184)
-  val gpui_that_hub_has_too_many: String get() = Tr.s(2185)
-  val gpui_that_code_is_wrong_check: String get() = Tr.s(2186)
-  val gpui_ask_anything_bot_thread_project: String get() = Tr.s(2187)
-  fun gpui_first_starting(home: Any): String = Tr.f(2188, arrayOf<Any>(home))
-  fun gpui_first_pairing(addr: Any): String = Tr.f(2189, arrayOf<Any>(addr))
-  val gpui_give_the_other_computer_s: String get() = Tr.s(2190)
-  val gpui_type_the_short_code_from: String get() = Tr.s(2191)
-  val gpui_where_should_backplane_keep_your: String get() = Tr.s(2192)
-  val gpui_backplane_keeps_your_threads_settings: String get() = Tr.s(2193)
-  val gpui_use_this_folder: String get() = Tr.s(2194)
-  val gpui_choose_a_folder2: String get() = Tr.s(2195)
-  val gpui_connect_to_a_hub_on: String get() = Tr.s(2196)
-  val gpui_a_hub_is_the_backplane: String get() = Tr.s(2197)
-  val gpui_this_folder_already_has_a: String get() = Tr.s(2198)
-  val gpui_backplane_old_data_is: String get() = Tr.s(2199)
-  val gpui_install_guide: String get() = Tr.s(2200)
-  val gpui_folder: String get() = Tr.s(2201)
-  val gpui_pairing_link_or_address: String get() = Tr.s(2202)
-  val gpui_short_code: String get() = Tr.s(2203)
-  fun gpui_install_failed(dir: Any, why: Any): String = Tr.f(2204, arrayOf<Any>(dir, why))
-  fun gpui_install_ask(dir: Any): String = Tr.f(2205, arrayOf<Any>(dir))
-  val gpui_needed_for_updates_not_now: String get() = Tr.s(2206)
-  val gpui_this_computer: String get() = Tr.s(2207)
-  val gpui_the_choice_could_not_be: String get() = Tr.s(2208)
-  val gpui_the_hub_could_not_be2: String get() = Tr.s(2209)
-  val gpui_pair_this_device_with_a: String get() = Tr.s(2210)
-  val gpui_in_use: String get() = Tr.s(2211)
-  val gpui_use: String get() = Tr.s(2212)
-  val gpui_the_hub_on_this_computer: String get() = Tr.s(2213)
-  val gpui_hub_home_on: String get() = Tr.s(2214)
-  val gpui_hub_home: String get() = Tr.s(2215)
-  val gpui_hub_home_away: String get() = Tr.s(2216)
-  val gpui_hub: String get() = Tr.s(2217)
-  val gpui_the_hub_is_not_answering: String get() = Tr.s(2218)
-  val gpui_restart_hub: String get() = Tr.s(2219)
-  fun gpui_hubbar_starting_phase(phase: Any): String = Tr.f(2220, arrayOf<Any>(phase))
-  val gpui_the_hub_is_starting: String get() = Tr.s(2221)
-  fun gpui_hubbar_down(why: Any): String = Tr.f(2222, arrayOf<Any>(why))
-  fun gpui_hubbar_stuck(what: Any): String = Tr.f(2223, arrayOf<Any>(what))
-  fun gpui_hubbar_said(code: Any): String = Tr.f(2224, arrayOf<Any>(code))
-  val gpui_asked_the_guard_on_this: String get() = Tr.s(2225)
-  val gpui_the_hub_s_machine_cannot: String get() = Tr.s(2226)
-  val gpui_restart_in_safe_mode: String get() = Tr.s(2227)
-  val gpui_roll_back_hub: String get() = Tr.s(2228)
-  val gpui_asking: String get() = Tr.s(2229)
-  fun gpui_hubbar_click_again(label: Any): String = Tr.f(2230, arrayOf<Any>(label))
-  val gpui_you_said: String get() = Tr.s(2231)
-  val gpui_agent_said: String get() = Tr.s(2232)
-  val gpui_action: String get() = Tr.s(2233)
-  val gpui_split: String get() = Tr.s(2234)
-  fun gpui_palette_open(kind: Any): String = Tr.f(2235, arrayOf<Any>(kind))
-  val gpui_viewer: String get() = Tr.s(2236)
-  fun gpui_palette_new_thread_in(project: Any): String = Tr.f(2237, arrayOf<Any>(project))
-  val gpui_conversation_history: String get() = Tr.s(2238)
-  val gpui_search_this_thread: String get() = Tr.s(2239)
-  val gpui_jump_to_a_thread_or: String get() = Tr.s(2240)
-  val gpui_jump_to_a_thread_run: String get() = Tr.s(2241)
-  val gpui_type_a_word_said_in: String get() = Tr.s(2242)
-  val gpui_approval: String get() = Tr.s(2243)
-  val gpui_question: String get() = Tr.s(2244)
-  val gpui_new_subthread: String get() = Tr.s(2245)
-  val gpui_move_to_top_level: String get() = Tr.s(2246)
-  val gpui_regenerate_title: String get() = Tr.s(2247)
-  val gpui_search_in_thread: String get() = Tr.s(2248)
-  val gpui_badge: String get() = Tr.s(2249)
-  fun gpui_ctx_click_again_to(what: Any): String = Tr.f(2250, arrayOf<Any>(what))
-  val gpui_snooze_tomorrow: String get() = Tr.s(2251)
-  fun gpui_ctx_snooze(`when`: Any): String = Tr.f(2252, arrayOf<Any>(`when`))
-  val gpui_goal_notes: String get() = Tr.s(2253)
-  val gpui_no_goal_yet_ask_an: String get() = Tr.s(2254)
-  val gpui_edit_goal_notes: String get() = Tr.s(2255)
-  fun gpui_projects_to_order(n: Any): String = Tr.f(2256, arrayOf<Any>(n))
-  fun gpui_projects_boards(n: Any): String = Tr.f(2257, arrayOf<Any>(n))
-  fun gpui_projects_threads(n: Any): String = Tr.f(2258, arrayOf<Any>(n))
-  val gpui_no_threads_yet: String get() = Tr.s(2259)
-  fun gpui_picker_no_effort(agent: Any): String = Tr.f(2260, arrayOf<Any>(agent))
-  fun gpui_picker_now(effort: Any): String = Tr.f(2261, arrayOf<Any>(effort))
-  val gpui_no_models: String get() = Tr.s(2262)
-  fun gpui_picker_more(n: Any): String = Tr.f(2263, arrayOf<Any>(n))
-  val gpui_picker_speed: String get() = Tr.s(2264)
-  fun gpui_picker_speed_normal_only(model: Any): String = Tr.f(2265, arrayOf<Any>(model))
-  val gpui_picker_favorites: String get() = Tr.s(2266)
-  val gpui_picker_favorite_add: String get() = Tr.s(2267)
-  val gpui_picker_favorite_remove: String get() = Tr.s(2268)
-  val gpui_speed_normal: String get() = Tr.s(2269)
-  val gpui_speed_fast: String get() = Tr.s(2270)
-  val gpui_speed_ultrafast: String get() = Tr.s(2271)
-  val gpui_speed_cost_x2: String get() = Tr.s(2272)
-  val gpui_speed_usage_x2half: String get() = Tr.s(2273)
-  val gpui_speed_usage_x8: String get() = Tr.s(2274)
-  val gpui_speed_priority_rate: String get() = Tr.s(2275)
-  val gpui_search_models: String get() = Tr.s(2276)
-  val gpui_to_do: String get() = Tr.s(2277)
-  val gpui_subagents: String get() = Tr.s(2278)
-  val gpui_add_an_item: String get() = Tr.s(2279)
-  fun gpui_panels_subagents(word: Any): String = Tr.f(2280, arrayOf<Any>(word))
-  val gpui_panels_kind_task: String get() = Tr.s(2281)
-  val gpui_runs: String get() = Tr.s(2282)
-  val gpui_doing: String get() = Tr.s(2283)
-  val gpui_asked: String get() = Tr.s(2284)
-  val gpui_steps: String get() = Tr.s(2285)
-  val gpui_none_reported_yet: String get() = Tr.s(2286)
-  fun gpui_panels_earlier(more: Any, step: Any): String = Tr.f(2287, arrayOf<Any>(more, step))
-  val gpui_reported: String get() = Tr.s(2288)
-  val gpui_paste_the_value: String get() = Tr.s(2289)
-  val gpui_a_secret_for_this_chat: String get() = Tr.s(2290)
-  fun gpui_sidebox_secret(name: Any): String = Tr.f(2291, arrayOf<Any>(name))
-  val gpui_not_needed: String get() = Tr.s(2292)
-  val gpui_attachments_need_a_hub_on: String get() = Tr.s(2293)
-  val gpui_open_a_thread_to_attach: String get() = Tr.s(2294)
-  fun gpui_attach_first(max: Any, skipped: Any): String = Tr.f(2295, arrayOf<Any>(max, skipped))
-  val gpui_img: String get() = Tr.s(2296)
-  val gpui_file: String get() = Tr.s(2297)
-  fun gpui_attach_uploading(name: Any): String = Tr.f(2298, arrayOf<Any>(name))
-  fun gpui_timeline_more_rows(n: Number): String = Tr.f(2299, arrayOf<Any>(n))
-  fun gpui_timeline_loading(name: Any): String = Tr.f(2300, arrayOf<Any>(name))
-  fun gpui_timeline_could_not_load(name: Any): String = Tr.f(2301, arrayOf<Any>(name))
-  val gpui_md_alert_note: String get() = Tr.s(2302)
-  val gpui_md_alert_tip: String get() = Tr.s(2303)
-  val gpui_md_alert_important: String get() = Tr.s(2304)
-  val gpui_md_alert_warning: String get() = Tr.s(2305)
-  val gpui_md_alert_caution: String get() = Tr.s(2306)
-  fun gpui_timeline_more_images(n: Number): String = Tr.f(2307, arrayOf<Any>(n))
-  fun gpui_order_named(name: Any): String = Tr.f(2308, arrayOf<Any>(name))
-  val gpui_buy_now: String get() = Tr.s(2309)
-  fun gpui_order_buy_now_price(price: Any): String = Tr.f(2310, arrayOf<Any>(price))
-  val gpui_order_requote: String get() = Tr.s(2311)
-  val gpui_order_unavailable_line: String get() = Tr.s(2312)
-  fun gpui_badge_away(name: Any): String = Tr.f(2313, arrayOf<Any>(name))
-  val gpui_badge_again: String get() = Tr.s(2314)
-  fun gpui_badge_on(name: Any): String = Tr.f(2315, arrayOf<Any>(name))
-  fun gpui_badge_runs_on(name: Any): String = Tr.f(2316, arrayOf<Any>(name))
-  fun gpui_badge_also_on(name: Any): String = Tr.f(2317, arrayOf<Any>(name))
-  fun gpui_unsent_restore(text: Any): String = Tr.f(2318, arrayOf<Any>(text))
-  val gpui_made_far_note: String get() = Tr.s(2319)
-  val gpui_picked_elsewhere: String get() = Tr.s(2320)
-  fun gpui_combo_key_model(key: Any): String = Tr.f(2321, arrayOf<Any>(key))
-  fun gpui_combo_key_account(key: Any): String = Tr.f(2322, arrayOf<Any>(key))
-  fun gpui_combo_left(pct: Any): String = Tr.f(2323, arrayOf<Any>(pct))
-  fun gpui_combo_resets(`when`: Any): String = Tr.f(2324, arrayOf<Any>(`when`))
-  val gpui_weekly: String get() = Tr.s(2325)
-  val gpui_state: String get() = Tr.s(2326)
-  val gpui_blocked: String get() = Tr.s(2327)
-  val gpui_finished: String get() = Tr.s(2328)
-  val gpui_inactive: String get() = Tr.s(2329)
-  val gpui_stalled: String get() = Tr.s(2330)
-  val gpui_the_right_spelling: String get() = Tr.s(2331)
-  val gpui_star_on_github: String get() = Tr.s(2332)
-  val gpui_star_dont_ask: String get() = Tr.s(2333)
-  val gpui_star_why: String get() = Tr.s(2334)
-  fun gpui_projects_unpushed(n: Number, upstream: Any): String = Tr.f(2335, arrayOf<Any>(n, upstream))
-  val gpui_projects_push: String get() = Tr.s(2336)
-  val chats_new: String get() = Tr.s(2337)
-  val chats_new_noproject: String get() = Tr.s(2338)
-  val chats_title: String get() = Tr.s(2339)
-  val chats_move: String get() = Tr.s(2340)
-  val chats_move_none: String get() = Tr.s(2341)
-  val chats_old_tip: String get() = Tr.s(2342)
-  val gpui_e_files_max_mb: String get() = Tr.s(2343)
-  fun gpui_e_files_max_note(mb: Any): String = Tr.f(2344, arrayOf<Any>(mb))
-  val gpui_e_dev_replay: String get() = Tr.s(2345)
-  val gpui_e_dev_replay_note: String get() = Tr.s(2346)
-  val gpui_e_dev_replay_button: String get() = Tr.s(2347)
-  val gpui_e_dev_star: String get() = Tr.s(2348)
-  val gpui_e_dev_star_show: String get() = Tr.s(2349)
-  val gpui_e_about_updates: String get() = Tr.s(2350)
-  val gpui_e_about_frames: String get() = Tr.s(2351)
-  val gpui_e_about_cef: String get() = Tr.s(2352)
-  val gpui_e_about_notices: String get() = Tr.s(2353)
-  fun gpui_e_about_notices_here(path: Any): String = Tr.f(2354, arrayOf<Any>(path))
-  fun gpui_e_about_notices_hub(path: Any): String = Tr.f(2355, arrayOf<Any>(path))
-  val gpui_e_open_folder: String get() = Tr.s(2356)
-  val gpui_e_agents_thinking: String get() = Tr.s(2357)
-  val gpui_e_agents_thinking_note: String get() = Tr.s(2358)
-  val gpui_e_agents_recall: String get() = Tr.s(2359)
-  val gpui_e_agents_recall_note: String get() = Tr.s(2360)
-  val gpui_e_order_comes: String get() = Tr.s(2361)
-  val gpui_e_devices_local_machine: String get() = Tr.s(2362)
-  val gpui_e_rules_standing: String get() = Tr.s(2363)
-  val gpui_e_rules_words: String get() = Tr.s(2364)
-  val gpui_e_rules_eg: String get() = Tr.s(2365)
-  val gpui_e_rules_add: String get() = Tr.s(2366)
-  val gpui_e_board_doing: String get() = Tr.s(2367)
-  val gpui_e_board_todo: String get() = Tr.s(2368)
-  val gpui_e_board_what: String get() = Tr.s(2369)
-  val gpui_e_board_eg: String get() = Tr.s(2370)
-  val gpui_e_board_add: String get() = Tr.s(2371)
-  val gpui_e_tz_phone_again: String get() = Tr.s(2372)
-  val gpui_e_tz_machine_again: String get() = Tr.s(2373)
-  val gpui_e_tz_phone_auto: String get() = Tr.s(2374)
-  val gpui_e_tz_machine_auto: String get() = Tr.s(2375)
-  val gpui_e_privacy_note: String get() = Tr.s(2376)
-  fun gpui_e_privacy_note_id(id: Any): String = Tr.f(2377, arrayOf<Any>(id))
-  val gpui_e_privacy_share: String get() = Tr.s(2378)
-  val gpui_e_privacy_reset: String get() = Tr.s(2379)
-  val gpui_e_privacy_report: String get() = Tr.s(2380)
-  fun gpui_e_writing_model_note(model: Any): String = Tr.f(2381, arrayOf<Any>(model))
-  fun gpui_e_kicad_none(platform: Any): String = Tr.f(2382, arrayOf<Any>(platform))
-  fun gpui_e_kicad_installing(version: Any): String = Tr.f(2383, arrayOf<Any>(version))
-  val gpui_e_kicad_starting: String get() = Tr.s(2384)
-  val gpui_e_kicad_ask: String get() = Tr.s(2385)
-  fun gpui_e_kicad_ask_note(version: Any, from: Any, into: Any): String = Tr.f(2386, arrayOf<Any>(version, from, into))
-  fun gpui_e_kicad_offer(version: Any, from: Any): String = Tr.f(2387, arrayOf<Any>(version, from))
-  val gpui_e_kicad_own: String get() = Tr.s(2388)
-  val gpui_e_kicad_notfound: String get() = Tr.s(2389)
-  fun gpui_e_kicad_found_version(version: Any, path: Any): String = Tr.f(2390, arrayOf<Any>(version, path))
-  fun gpui_e_kicad_found_stock(version: Any, path: Any): String = Tr.f(2391, arrayOf<Any>(version, path))
-  fun gpui_e_kicad_offer_stock(version: Any, pin: Any, from: Any): String = Tr.f(2392, arrayOf<Any>(version, pin, from))
-  fun gpui_e_kicad_found(path: Any): String = Tr.f(2393, arrayOf<Any>(path))
-  fun gpui_e_kicad_just(version: Any, path: Any): String = Tr.f(2394, arrayOf<Any>(version, path))
-  fun gpui_e_kicad_passed(version: Any, path: Any, set: Any): String = Tr.f(2395, arrayOf<Any>(version, path, set))
-  val gpui_e_kicad_checking: String get() = Tr.s(2396)
-  val gpui_e_kicad_path_hint: String get() = Tr.s(2397)
-  val gpui_e_freecad_notfound: String get() = Tr.s(2398)
-  val gpui_e_freecad_notat: String get() = Tr.s(2399)
-  val gpui_e_freecad_path_hint: String get() = Tr.s(2400)
-  val gpui_e_keys_kept: String get() = Tr.s(2401)
-  val gpui_e_keys_again: String get() = Tr.s(2402)
-  val gpui_e_keys_forget_it: String get() = Tr.s(2403)
-  val gpui_e_keys_note: String get() = Tr.s(2404)
-  val gpui_e_fallback_unavailable: String get() = Tr.s(2405)
-  val gpui_e_fallback_provider: String get() = Tr.s(2406)
-  val gpui_e_fallback_provider_note: String get() = Tr.s(2407)
-  val gpui_e_fallback_add: String get() = Tr.s(2408)
-  fun gpui_e_usage_line(turns: Number, input: Any, cread: Any, cwrite: Any, output: Any, cost: Any): String = Tr.f(2409, arrayOf<Any>(turns, input, cread, cwrite, output, cost))
-  val gpui_e_cost_not_reported: String get() = Tr.s(2410)
-  val gpui_e_usage_title: String get() = Tr.s(2411)
-  val gpui_e_usage_none: String get() = Tr.s(2412)
-  val gpui_e_usage_unknown: String get() = Tr.s(2413)
-  val gpui_e_usage_all: String get() = Tr.s(2414)
-  val gpui_e_page_back: String get() = Tr.s(2415)
-  fun gpui_e_rules_on_refuses(tool: Any): String = Tr.f(2416, arrayOf<Any>(tool))
-  fun gpui_e_rules_off_refuses(tool: Any): String = Tr.f(2417, arrayOf<Any>(tool))
-  fun gpui_e_rules_on_refuses_word(tool: Any, word: Any): String = Tr.f(2418, arrayOf<Any>(tool, word))
-  fun gpui_e_rules_off_refuses_word(tool: Any, word: Any): String = Tr.f(2419, arrayOf<Any>(tool, word))
-  fun gpui_e_rules_on_using(tool: Any): String = Tr.f(2420, arrayOf<Any>(tool))
-  fun gpui_e_rules_off_using(tool: Any): String = Tr.f(2421, arrayOf<Any>(tool))
-  fun gpui_e_board_doing_due(due: Any): String = Tr.f(2422, arrayOf<Any>(due))
-  fun gpui_e_board_blocked_due(due: Any): String = Tr.f(2423, arrayOf<Any>(due))
-  fun gpui_e_board_todo_due(due: Any): String = Tr.f(2424, arrayOf<Any>(due))
-  fun gpui_e_board_done_due(due: Any): String = Tr.f(2425, arrayOf<Any>(due))
-  fun gpui_e_tz_zone_set(zone: Any): String = Tr.f(2426, arrayOf<Any>(zone))
-  fun gpui_e_tz_zone_phone(zone: Any): String = Tr.f(2427, arrayOf<Any>(zone))
-  fun gpui_e_tz_zone_machine(zone: Any): String = Tr.f(2428, arrayOf<Any>(zone))
-  fun gpui_e_tz_zone_none(zone: Any): String = Tr.f(2429, arrayOf<Any>(zone))
-  fun gpui_e_subs_done(n: Any): String = Tr.f(2430, arrayOf<Any>(n))
-  fun gpui_e_lock_starting(who: Any): String = Tr.f(2431, arrayOf<Any>(who))
-  fun gpui_e_lock_position(n: Any, who: Any): String = Tr.f(2432, arrayOf<Any>(n, who))
-  fun gpui_e_subs_where(harness: Any): String = Tr.f(2433, arrayOf<Any>(harness))
-  fun gpui_e_picker_already(path: Any): String = Tr.f(2434, arrayOf<Any>(path))
-  fun gpui_e_picker_create(path: Any): String = Tr.f(2435, arrayOf<Any>(path))
-  fun gpui_e_picker_notdir(path: Any): String = Tr.f(2436, arrayOf<Any>(path))
-  val gpui_e_picker_hint: String get() = Tr.s(2437)
-  val gpui_e_fab_nogoal: String get() = Tr.s(2438)
-  fun gpui_e_fab_unavailable_line(error: Any, line: Any): String = Tr.f(2439, arrayOf<Any>(error, line))
-  fun gpui_e_fab_buy_label(label: Any): String = Tr.f(2440, arrayOf<Any>(label))
-  val gpui_e_tools_back: String get() = Tr.s(2441)
-  val gpui_e_tools_back_tip: String get() = Tr.s(2442)
-  val gpui_e_status_working: String get() = Tr.s(2443)
-  val gpui_e_status_inactive: String get() = Tr.s(2444)
-  val gpui_e_status_finished: String get() = Tr.s(2445)
-  val gpui_e_status_waiting: String get() = Tr.s(2446)
-  val gpui_e_status_blocked: String get() = Tr.s(2447)
-  fun gpui_e_acct_saved(who: Any): String = Tr.f(2448, arrayOf<Any>(who))
-  fun gpui_e_acct_cli(who: Any): String = Tr.f(2449, arrayOf<Any>(who))
-  fun gpui_e_acct_window_resets(label: Any, left: Any, `when`: Any): String = Tr.f(2450, arrayOf<Any>(label, left, `when`))
-  fun gpui_e_acct_default_left(left: Any): String = Tr.f(2451, arrayOf<Any>(left))
-  fun gpui_e_acct_profile_left(name: Any, left: Any): String = Tr.f(2452, arrayOf<Any>(name, left))
-  fun gpui_e_acct_extra_off(used: Any): String = Tr.f(2453, arrayOf<Any>(used))
-  fun gpui_e_acct_extra_of_off(used: Any, limit: Any): String = Tr.f(2454, arrayOf<Any>(used, limit))
-  fun gpui_e_acct_extra_off_why(used: Any, reason: Any): String = Tr.f(2455, arrayOf<Any>(used, reason))
-  fun gpui_e_acct_extra_of_off_why(used: Any, limit: Any, reason: Any): String = Tr.f(2456, arrayOf<Any>(used, limit, reason))
-  val gpui_e_tok_noreading: String get() = Tr.s(2457)
-  fun gpui_e_tok_notby(provider: Any): String = Tr.f(2458, arrayOf<Any>(provider))
-  fun gpui_e_tok_ofwindow(used: Any, window: Any, pct: Any): String = Tr.f(2459, arrayOf<Any>(used, window, pct))
-  fun gpui_e_tok_rate(rate: Any): String = Tr.f(2460, arrayOf<Any>(rate))
-  val gpui_e_tok_held: String get() = Tr.s(2461)
-  val gpui_e_tok_room: String get() = Tr.s(2462)
-  val gpui_e_tok_noturn: String get() = Tr.s(2463)
-  val gpui_e_tok_tokens_label: String get() = Tr.s(2464)
-  val gpui_e_tok_nottold: String get() = Tr.s(2465)
-  val gpui_e_tok_input: String get() = Tr.s(2466)
-  val gpui_e_tok_cread: String get() = Tr.s(2467)
-  val gpui_e_tok_cwrite: String get() = Tr.s(2468)
-  val gpui_e_tok_output: String get() = Tr.s(2469)
-  fun gpui_e_tok_output_reasoning(n: Any, r: Any): String = Tr.f(2470, arrayOf<Any>(n, r))
-  val gpui_e_tok_cost: String get() = Tr.s(2471)
-  val gpui_e_tok_notreported: String get() = Tr.s(2472)
-  val gpui_e_tok_speed: String get() = Tr.s(2473)
-  val gpui_e_tok_modeltime: String get() = Tr.s(2474)
-  fun gpui_e_tok_modeltime_steps(time: Any, n: Number): String = Tr.f(2475, arrayOf<Any>(time, n))
-  val gpui_e_tok_turntime: String get() = Tr.s(2476)
-  val gpui_e_tok_noturns: String get() = Tr.s(2477)
-  val gpui_e_tok_turns: String get() = Tr.s(2478)
-  fun gpui_e_tok_turns_unknown(n: Any, m: Any): String = Tr.f(2479, arrayOf<Any>(n, m))
-  val gpui_e_tok_hits: String get() = Tr.s(2480)
-  fun gpui_e_tok_hits_of(pct: Any): String = Tr.f(2481, arrayOf<Any>(pct))
-  fun gpui_e_tok_cost_some(cost: Any, n: Any): String = Tr.f(2482, arrayOf<Any>(cost, n))
-  val gpui_e_tok_avg: String get() = Tr.s(2483)
-  val gpui_e_tok_last: String get() = Tr.s(2484)
-  val gpui_e_tok_bymodel: String get() = Tr.s(2485)
-  fun gpui_e_tok_model_line(`in`: Any, out: Any, cread: Any, cwrite: Any): String = Tr.f(2486, arrayOf<Any>(`in`, out, cread, cwrite))
-  fun gpui_e_tok_model_line_web(`in`: Any, out: Any, cread: Any, cwrite: Any, n: Any): String = Tr.f(2487, arrayOf<Any>(`in`, out, cread, cwrite, n))
-  val gpui_e_tok_speed_note: String get() = Tr.s(2488)
-  val gpui_e_viewer_noproject: String get() = Tr.s(2489)
-  val gpui_e_viewer_remote_files: String get() = Tr.s(2490)
-  val gpui_e_viewer_remote_parts: String get() = Tr.s(2491)
-  val gpui_e_viewer_noparts: String get() = Tr.s(2492)
-  val gpui_e_order_how: String get() = Tr.s(2493)
-  val gpui_e_fallback_note: String get() = Tr.s(2494)
-  val gpui_e_fallback_model: String get() = Tr.s(2495)
-  fun gpui_e_usage_line_nocost(turns: Number, input: Any, cread: Any, cwrite: Any, output: Any): String = Tr.f(2496, arrayOf<Any>(turns, input, cread, cwrite, output))
-  fun gpui_e_acct_weekly_resets(left: Any, `when`: Any): String = Tr.f(2497, arrayOf<Any>(left, `when`))
-  fun gpui_e_acct_hour5_resets(left: Any, `when`: Any): String = Tr.f(2498, arrayOf<Any>(left, `when`))
-  fun gpui_e_acct_opus_resets(left: Any, `when`: Any): String = Tr.f(2499, arrayOf<Any>(left, `when`))
-  fun gpui_e_acct_sonnet_resets(left: Any, `when`: Any): String = Tr.f(2500, arrayOf<Any>(left, `when`))
-  val notify_which_alerts_reach_you_quiet: String get() = Tr.s(2501)
-  val notify_notifications: String get() = Tr.s(2502)
-  val notify_phones: String get() = Tr.s(2503)
-  val notify_only_your_uberbot_pushes_to: String get() = Tr.s(2504)
-  val notify_quiet_hours: String get() = Tr.s(2505)
-  val notify_a_push_waits_until_the: String get() = Tr.s(2506)
-  val notify_quiet_from_and_until: String get() = Tr.s(2507)
-  val notify_hh_mm_hours: String get() = Tr.s(2508)
-  val notify_times_are_hh_mm_hours: String get() = Tr.s(2509)
-  val notify_quiet_hours_are_hh_mm: String get() = Tr.s(2510)
-  val notify_urgent_asks_come_through: String get() = Tr.s(2511)
-  val notify_an_approval_or_a_question: String get() = Tr.s(2512)
-  val notify_iphones_that_hear_a_push: String get() = Tr.s(2513)
-  val notify_none_yet_an_iphone_registers: String get() = Tr.s(2514)
-  val notify_muted_hears_only_what_urgent: String get() = Tr.s(2515)
-  val notify_hears_alerts: String get() = Tr.s(2516)
-  val notify_hears: String get() = Tr.s(2517)
-  val notify_muted: String get() = Tr.s(2518)
-  val gpui_e_failover_failover_order: String get() = Tr.s(2519)
-  val gpui_e_failover_applies_to_all_threads_bots: String get() = Tr.s(2520)
-  val gpui_e_failover_not_installed_on_this_machine: String get() = Tr.s(2521)
-  val gpui_e_failover_its_own_sign_in_on: String get() = Tr.s(2522)
-  val gpui_e_failover_account: String get() = Tr.s(2523)
-  fun gpui_e_failover_accounts_the_one_with_the(n: Any): String = Tr.f(2524, arrayOf<Any>(n))
-  val gpui_e_failover_default_order: String get() = Tr.s(2525)
-  val gpui_e_failover_use_the_default_order: String get() = Tr.s(2526)
-  val gpui_e_failover_choose_an_installed_provider_and: String get() = Tr.s(2527)
-  val gpui_e_failover_add_to_the_order: String get() = Tr.s(2528)
-  val ring_ring: String get() = Tr.s(2529)
-  val ring_pebble_index_ring: String get() = Tr.s(2530)
-  val ring_test_event: String get() = Tr.s(2531)
-  val ring_recordings: String get() = Tr.s(2532)
-  val ring_search_what_you_said: String get() = Tr.s(2533)
-  val ring_copy_header: String get() = Tr.s(2534)
-  val ring_copy_both: String get() = Tr.s(2535)
-  val ring_set_up_again: String get() = Tr.s(2536)
-  val ring_show_all: String get() = Tr.s(2537)
-  val ring_hear_again_local: String get() = Tr.s(2538)
-  val ring_hear_again_openai: String get() = Tr.s(2539)
-  val ring_what_happened: String get() = Tr.s(2540)
-  val ring_send_again: String get() = Tr.s(2541)
-  val ring_no_recordings_yet: String get() = Tr.s(2542)
-  val hub_acct_claude_sync: String get() = Tr.s(2543)
-  val hub_acct_add_a_claude_sync_token: String get() = Tr.s(2544)
-  val hub_acct_connected_sync_token: String get() = Tr.s(2545)
-  val hub_acct_sync_token_ended: String get() = Tr.s(2546)
-  fun hub_acct_sync_token_ends(`when`: Any): String = Tr.f(2547, arrayOf<Any>(`when`))
-  val gpui_e_telemetry_notice: String get() = Tr.s(2548)
-  val voice_cmd_sending: String get() = Tr.s(2549)
-  val voice_cmd_cleared: String get() = Tr.s(2550)
-  val voice_cmd_sent: String get() = Tr.s(2551)
-  val voice_cmd_undo: String get() = Tr.s(2552)
-  val settings_voice_cmd_send: String get() = Tr.s(2553)
-  fun settings_voice_cmd_send_note(phrase: Any, now: Any): String = Tr.f(2554, arrayOf<Any>(phrase, now))
-  val settings_voice_cmd_off: String get() = Tr.s(2555)
-  val settings_voice_cmd_hint: String get() = Tr.s(2556)
-  val settings_voice_cmd_default: String get() = Tr.s(2557)
-  val settings_voice_cmds: String get() = Tr.s(2558)
-  val settings_voice_cmds_note: String get() = Tr.s(2559)
-  val voice_cmd_scratch: String get() = Tr.s(2560)
-  val voice_cmd_newline: String get() = Tr.s(2561)
-  val voice_cmd_cancel: String get() = Tr.s(2562)
-  val settings_voice_auto: String get() = Tr.s(2563)
-  val settings_voice_auto_note: String get() = Tr.s(2564)
-  fun voice_cmd_secs(s: Any): String = Tr.f(2565, arrayOf<Any>(s))
-  val voice_eot_sending: String get() = Tr.s(2566)
-  val voice_eot_hold: String get() = Tr.s(2567)
-  val settings_voice_eot: String get() = Tr.s(2568)
-  val settings_voice_eot_note: String get() = Tr.s(2569)
-  val settings_voice_eot_eager: String get() = Tr.s(2570)
-  fun settings_voice_eot_eager_note(now: Any): String = Tr.f(2571, arrayOf<Any>(now))
-  fun settings_voice_eot_eager_learned(now: Any, nudge: Any, sent: Any, undone: Any): String = Tr.f(2572, arrayOf<Any>(now, nudge, sent, undone))
-  val settings_voice_eot_reset: String get() = Tr.s(2573)
-  val settings_voice_jev: String get() = Tr.s(2574)
-  val settings_voice_jev_set: String get() = Tr.s(2575)
-  val settings_voice_jev_unset: String get() = Tr.s(2576)
-  val settings_voice_jev_key: String get() = Tr.s(2577)
-  val settings_voice_jev_use: String get() = Tr.s(2578)
-  val settings_voice_jev_test: String get() = Tr.s(2579)
-  val settings_voice_jev_model: String get() = Tr.s(2580)
-  val settings_voice_jev_check: String get() = Tr.s(2581)
-  fun settings_voice_jev_failed(e: Any): String = Tr.f(2582, arrayOf<Any>(e))
-  fun settings_voice_jev_result(a: Any, ams: Any, b: Any, bms: Any): String = Tr.f(2583, arrayOf<Any>(a, ams, b, bms))
-  fun settings_voice_jev_last(ms: Any): String = Tr.f(2584, arrayOf<Any>(ms))
-  fun settings_voice_jev_fallback(e: Any): String = Tr.f(2585, arrayOf<Any>(e))
-  fun voice_eot_eager_label(t: Any): String = Tr.f(2586, arrayOf<Any>(t))
-  fun voice_eot_default_label(t: Any): String = Tr.f(2587, arrayOf<Any>(t))
-  fun voice_eot_patient_label(t: Any): String = Tr.f(2588, arrayOf<Any>(t))
-  val voice_always_listening: String get() = Tr.s(2589)
-  val voice_always_paused: String get() = Tr.s(2590)
-  val voice_always_muted: String get() = Tr.s(2591)
-  val keys_always: String get() = Tr.s(2592)
-  val voice_always_status: String get() = Tr.s(2593)
-  fun voice_always_note_paused(why: Any): String = Tr.f(2594, arrayOf<Any>(why))
-  val settings_voice_always: String get() = Tr.s(2595)
-  val settings_voice_always_note: String get() = Tr.s(2596)
-  val settings_voice_always_start: String get() = Tr.s(2597)
-  val settings_voice_always_start_note: String get() = Tr.s(2598)
-  val settings_voice_always_word1: String get() = Tr.s(2599)
-  val settings_voice_always_word2: String get() = Tr.s(2600)
-  val settings_voice_always_ms: String get() = Tr.s(2601)
-  val settings_voice_always_pause: String get() = Tr.s(2602)
-  val settings_voice_always_pause_note: String get() = Tr.s(2603)
-  fun settings_voice_always_pause_note2(apps: Any): String = Tr.f(2604, arrayOf<Any>(apps))
-  val settings_voice_always_ignore: String get() = Tr.s(2605)
-  val settings_voice_always_lock: String get() = Tr.s(2606)
-  val settings_voice_always_call: String get() = Tr.s(2607)
-  val settings_voice_always_away: String get() = Tr.s(2608)
-  val settings_voice_always_saveapps: String get() = Tr.s(2609)
-  val settings_voice_always_target: String get() = Tr.s(2610)
-  val settings_voice_always_target_note: String get() = Tr.s(2611)
-  val settings_voice_always_open: String get() = Tr.s(2612)
-  val settings_voice_speaker: String get() = Tr.s(2613)
-  fun settings_voice_speaker_on(n: Any): String = Tr.f(2614, arrayOf<Any>(n))
-  fun settings_voice_speaker_learning(n: Any, k: Any): String = Tr.f(2615, arrayOf<Any>(n, k))
-  val settings_voice_speaker_reenrol: String get() = Tr.s(2616)
-  val voice_always_pill_listening: String get() = Tr.s(2617)
-  val voice_always_pill_paused: String get() = Tr.s(2618)
-  val voice_always_pill_listen: String get() = Tr.s(2619)
-  fun voice_mark_tip(stt: Any, conf: Any): String = Tr.f(2620, arrayOf<Any>(stt, conf))
-  fun voice_mark_unsure(words: Any): String = Tr.f(2621, arrayOf<Any>(words))
-  val voice_mark_edited: String get() = Tr.s(2622)
-  val gpui_side_old_chats_that_belong_to: String get() = Tr.s(2623)
-  val gpui_side_group_projects: String get() = Tr.s(2624)
-  val gpui_side_on_projects_with_nothing_going: String get() = Tr.s(2625)
-  val gpui_side_no_group: String get() = Tr.s(2626)
-  val gpui_e_freecad_install: String get() = Tr.s(2627)
-  val gpui_e_freecad_ask: String get() = Tr.s(2628)
-  val gpui_e_freecad_installing: String get() = Tr.s(2629)
-  val gpui_e_freecad_page: String get() = Tr.s(2630)
-  fun gpui_e_freecad_ask_note(into: Any): String = Tr.f(2631, arrayOf<Any>(into))
-  val gpui_e_freecad_offer: String get() = Tr.s(2632)
-  val gpui_e_picker_clone_hint: String get() = Tr.s(2633)
-  fun gpui_e_picker_clone_typed(origin: Any): String = Tr.f(2634, arrayOf<Any>(origin))
-  val settings_git_page: String get() = Tr.s(2635)
-  val settings_git_autopush: String get() = Tr.s(2636)
-  val settings_git_autopush_note: String get() = Tr.s(2637)
-  val settings_git_notice: String get() = Tr.s(2638)
-  val settings_git_offbranch: String get() = Tr.s(2639)
-  val settings_git_offbranch_note: String get() = Tr.s(2640)
-  val settings_browser_start: String get() = Tr.s(2641)
-  val settings_browser_start_note: String get() = Tr.s(2642)
-  val settings_browser_opens: String get() = Tr.s(2643)
-  val settings_browser_reset: String get() = Tr.s(2644)
-  val settings_browser_blank: String get() = Tr.s(2645)
-  fun settings_browser_now_default(url: Any): String = Tr.f(2646, arrayOf<Any>(url))
-  val settings_browser_now_blank: String get() = Tr.s(2647)
-  fun settings_browser_now(url: Any): String = Tr.f(2648, arrayOf<Any>(url))
-  val settings_browser_bad: String get() = Tr.s(2649)
-  val gpui_f_group_install: String get() = Tr.s(2650)
-  val gpui_f_group_agents: String get() = Tr.s(2651)
-  val gpui_f_group_cad: String get() = Tr.s(2652)
-  val gpui_f_group_devices: String get() = Tr.s(2653)
-  val gpui_f_group_first: String get() = Tr.s(2654)
-  val gpui_f_group_tour: String get() = Tr.s(2655)
-  fun gpui_f_counter(i: Number, n: Number): String = Tr.f(2656, arrayOf<Any>(i, n))
-  fun gpui_f_progress(d: Number, n: Number): String = Tr.f(2657, arrayOf<Any>(d, n))
-  val gpui_f_next: String get() = Tr.s(2658)
-  val gpui_f_skip_step: String get() = Tr.s(2659)
-  val gpui_f_finish_later: String get() = Tr.s(2660)
-  val gpui_f_end_setup: String get() = Tr.s(2661)
-  val gpui_f_finish_setup: String get() = Tr.s(2662)
-  val gpui_f_welcome: String get() = Tr.s(2663)
-  val gpui_f_welcome_body: String get() = Tr.s(2664)
-  val gpui_f_installed: String get() = Tr.s(2665)
-  fun gpui_f_install_body_linux(version: Any): String = Tr.f(2666, arrayOf<Any>(version))
-  fun gpui_f_install_body_darwin(version: Any): String = Tr.f(2667, arrayOf<Any>(version))
-  fun gpui_f_install_body_windows(version: Any): String = Tr.f(2668, arrayOf<Any>(version))
-  val gpui_f_program: String get() = Tr.s(2669)
-  val gpui_f_terminal_command: String get() = Tr.s(2670)
-  fun gpui_f_found_at(path: Any): String = Tr.f(2671, arrayOf<Any>(path))
-  val gpui_f_path_fix: String get() = Tr.s(2672)
-  val gpui_f_path_fix_windows: String get() = Tr.s(2673)
-  val gpui_f_updates: String get() = Tr.s(2674)
-  val gpui_f_updates_note: String get() = Tr.s(2675)
-  val gpui_f_home_title: String get() = Tr.s(2676)
-  val gpui_f_home_body: String get() = Tr.s(2677)
-  val gpui_f_data_folder: String get() = Tr.s(2678)
-  fun gpui_f_hub_listens(addr: Any): String = Tr.f(2679, arrayOf<Any>(addr))
-  val gpui_f_other_folder: String get() = Tr.s(2680)
-  val gpui_f_other_folder_note: String get() = Tr.s(2681)
-  val gpui_f_choose_folder: String get() = Tr.s(2682)
-  fun gpui_f_installing(label: Any): String = Tr.f(2683, arrayOf<Any>(label))
-  val gpui_f_starting: String get() = Tr.s(2684)
-  fun gpui_f_did_not_install(label: Any): String = Tr.f(2685, arrayOf<Any>(label))
-  fun gpui_f_install_label(label: Any): String = Tr.f(2686, arrayOf<Any>(label))
-  val gpui_f_winget_note: String get() = Tr.s(2687)
-  val gpui_f_runs_codex: String get() = Tr.s(2688)
-  val gpui_f_runs_vendor: String get() = Tr.s(2689)
-  fun gpui_f_get_label(label: Any): String = Tr.f(2690, arrayOf<Any>(label))
-  val gpui_f_opens_download: String get() = Tr.s(2691)
-  val gpui_f_checking: String get() = Tr.s(2692)
-  val gpui_f_import_title: String get() = Tr.s(2693)
-  val gpui_f_import_copied: String get() = Tr.s(2694)
-  fun gpui_f_import_body(from: Any): String = Tr.f(2695, arrayOf<Any>(from))
-  val gpui_f_import_nothing: String get() = Tr.s(2696)
-  val gpui_f_import_nothing_note: String get() = Tr.s(2697)
-  val gpui_f_import_what: String get() = Tr.s(2698)
-  val gpui_f_import_notcounted: String get() = Tr.s(2699)
-  val gpui_f_import_count: String get() = Tr.s(2700)
-  val gpui_f_import_counting: String get() = Tr.s(2701)
-  val gpui_f_import_reading: String get() = Tr.s(2702)
-  val gpui_f_import_nothing_new: String get() = Tr.s(2703)
-  val gpui_f_import_here_already: String get() = Tr.s(2704)
-  val gpui_f_import_count_again: String get() = Tr.s(2705)
-  val gpui_f_import_comes: String get() = Tr.s(2706)
-  val gpui_f_import_import: String get() = Tr.s(2707)
-  val gpui_f_import_import_note: String get() = Tr.s(2708)
-  val gpui_f_import_withkeys: String get() = Tr.s(2709)
-  val gpui_f_import_withkeys_note: String get() = Tr.s(2710)
-  val gpui_f_import_importing: String get() = Tr.s(2711)
-  fun gpui_f_import_events(done: Number, of: Number): String = Tr.f(2712, arrayOf<Any>(done, of))
-  val gpui_f_import_imported: String get() = Tr.s(2713)
-  val gpui_f_import_nothing_came: String get() = Tr.s(2714)
-  val gpui_f_import_again: String get() = Tr.s(2715)
-  val gpui_f_import_again_note: String get() = Tr.s(2716)
-  val gpui_f_import_stopped: String get() = Tr.s(2717)
-  fun gpui_f_import_n_projects(n: Number): String = Tr.f(2718, arrayOf<Any>(n))
-  fun gpui_f_import_n_threads(t: Number, m: Number): String = Tr.f(2719, arrayOf<Any>(t, m))
-  fun gpui_f_import_n_newmsgs(m: Number): String = Tr.f(2720, arrayOf<Any>(m))
-  fun gpui_f_import_n_bots(b: Number, m: Number): String = Tr.f(2721, arrayOf<Any>(b, m))
-  fun gpui_f_import_n_rooms(r: Number, p: Number): String = Tr.f(2722, arrayOf<Any>(r, p))
-  fun gpui_f_import_n_routines(n: Number): String = Tr.f(2723, arrayOf<Any>(n))
-  fun gpui_f_import_n_settings(n: Number): String = Tr.f(2724, arrayOf<Any>(n))
-  fun gpui_f_import_n_devices(n: Number): String = Tr.f(2725, arrayOf<Any>(n))
-  fun gpui_f_import_n_subagents(n: Number): String = Tr.f(2726, arrayOf<Any>(n))
-  val gpui_f_import_nothing_new_dot: String get() = Tr.s(2727)
-  val gpui_f_note_mailruns: String get() = Tr.s(2728)
-  fun gpui_f_note_mailruns_text(n: Number): String = Tr.f(2729, arrayOf<Any>(n))
-  val gpui_f_note_routines: String get() = Tr.s(2730)
-  fun gpui_f_note_routines_text(n: Number): String = Tr.f(2731, arrayOf<Any>(n))
-  val gpui_f_note_machines: String get() = Tr.s(2732)
-  val gpui_f_note_machines_text: String get() = Tr.s(2733)
-  val gpui_f_note_keys: String get() = Tr.s(2734)
-  val gpui_f_note_keys_text: String get() = Tr.s(2735)
-  val gpui_f_note_google: String get() = Tr.s(2736)
-  val gpui_f_note_google_text: String get() = Tr.s(2737)
-  val gpui_f_note_clashes: String get() = Tr.s(2738)
-  fun gpui_f_note_clashes_text(n: Number): String = Tr.f(2739, arrayOf<Any>(n))
-  val gpui_f_note_fresh: String get() = Tr.s(2740)
-  val gpui_f_note_fresh_text: String get() = Tr.s(2741)
-  val gpui_f_note_running: String get() = Tr.s(2742)
-  val gpui_f_note_running_text: String get() = Tr.s(2743)
-  val gpui_f_note_botfolder: String get() = Tr.s(2744)
-  fun gpui_f_note_botfolder_text(name: Any, gb: Any, path: Any): String = Tr.f(2745, arrayOf<Any>(name, gb, path))
-  val gpui_f_note_notcopied: String get() = Tr.s(2746)
-  fun gpui_f_note_notcopied_text(path: Any, why: Any): String = Tr.f(2747, arrayOf<Any>(path, why))
-  val gpui_f_note_signin: String get() = Tr.s(2748)
-  fun gpui_f_note_signin_text(names: Any): String = Tr.f(2749, arrayOf<Any>(names))
-  val gpui_f_note_accounts_text: String get() = Tr.s(2750)
-  fun gpui_f_note_vault_text(why: Any): String = Tr.f(2751, arrayOf<Any>(why))
-  fun gpui_f_ov_counts(p: Number, pn: Number, t: Number, tn: Number, e: Number, en: Number): String = Tr.f(2752, arrayOf<Any>(p, pn, t, tn, e, en))
-  fun gpui_f_ov_mb(done: Number, total: Number): String = Tr.f(2753, arrayOf<Any>(done, total))
-  fun gpui_f_ov_files(n: Number): String = Tr.f(2754, arrayOf<Any>(n))
-  fun gpui_f_ov_now(what: Any): String = Tr.f(2755, arrayOf<Any>(what))
-  fun gpui_f_ov_min(n: Number): String = Tr.f(2756, arrayOf<Any>(n))
-  fun gpui_f_ov_s(n: Number): String = Tr.f(2757, arrayOf<Any>(n))
-  val gpui_f_ov_measuring: String get() = Tr.s(2758)
-  val gpui_f_ov_title: String get() = Tr.s(2759)
-  fun gpui_f_ov_body(what: Any): String = Tr.f(2760, arrayOf<Any>(what))
-  fun gpui_f_ov_took(n: Number): String = Tr.f(2761, arrayOf<Any>(n))
-  val gpui_f_ov_here: String get() = Tr.s(2762)
-  fun gpui_f_ov_failed_in(why: Any, from: Any): String = Tr.f(2763, arrayOf<Any>(why, from))
-  fun gpui_f_ov_failed(why: Any): String = Tr.f(2764, arrayOf<Any>(why))
-  val gpui_f_usage_title: String get() = Tr.s(2765)
-  val gpui_f_usage_body: String get() = Tr.s(2766)
-  val gpui_f_usage_share: String get() = Tr.s(2767)
-  val gpui_f_usage_saved: String get() = Tr.s(2768)
-  val gpui_f_usage_choose: String get() = Tr.s(2769)
-  fun gpui_f_agent_found_signed(path: Any): String = Tr.f(2770, arrayOf<Any>(path))
-  fun gpui_f_agent_found_signed_who(path: Any, who: Any): String = Tr.f(2771, arrayOf<Any>(path, who))
-  fun gpui_f_agent_found_notsigned(path: Any): String = Tr.f(2772, arrayOf<Any>(path))
-  fun gpui_f_agent_found_howsign(path: Any, cmd: Any): String = Tr.f(2773, arrayOf<Any>(path, cmd))
-  fun gpui_f_agent_version(version: Any, path: Any): String = Tr.f(2774, arrayOf<Any>(version, path))
-  fun gpui_f_agent_version_signed(version: Any, path: Any): String = Tr.f(2775, arrayOf<Any>(version, path))
-  fun gpui_f_agent_version_signed_who(version: Any, path: Any, who: Any): String = Tr.f(2776, arrayOf<Any>(version, path, who))
-  fun gpui_f_agent_version_notsigned(version: Any, path: Any): String = Tr.f(2777, arrayOf<Any>(version, path))
-  fun gpui_f_agent_version_howsign(version: Any, path: Any, cmd: Any): String = Tr.f(2778, arrayOf<Any>(version, path, cmd))
-  val gpui_f_not_installed: String get() = Tr.s(2779)
-  val gpui_f_or_terminal: String get() = Tr.s(2780)
-  fun gpui_f_no_install_button(cmd: Any): String = Tr.f(2781, arrayOf<Any>(cmd))
-  val gpui_f_check_again: String get() = Tr.s(2782)
-  val gpui_f_check_again_note: String get() = Tr.s(2783)
-  val gpui_f_check_again_one: String get() = Tr.s(2784)
-  val gpui_f_claude_title: String get() = Tr.s(2785)
-  val gpui_f_claude_body: String get() = Tr.s(2786)
-  val gpui_f_codex_title: String get() = Tr.s(2787)
-  val gpui_f_codex_body: String get() = Tr.s(2788)
-  val gpui_f_others_title: String get() = Tr.s(2789)
-  val gpui_f_others_body: String get() = Tr.s(2790)
-  fun gpui_f_tool_runs(name: Any, version: Any, path: Any): String = Tr.f(2791, arrayOf<Any>(name, version, path))
-  fun gpui_f_tool_broken(path: Any, why: Any): String = Tr.f(2792, arrayOf<Any>(path, why))
-  fun gpui_f_tool_notfound(name: Any): String = Tr.f(2793, arrayOf<Any>(name))
-  val gpui_f_kicad_body: String get() = Tr.s(2794)
-  fun gpui_f_kicad_ok_v(version: Any, cli: Any): String = Tr.f(2795, arrayOf<Any>(version, cli))
-  fun gpui_f_kicad_ok(cli: Any): String = Tr.f(2796, arrayOf<Any>(cli))
-  val gpui_f_releases: String get() = Tr.s(2797)
-  fun gpui_f_kicad_auto(version: Any): String = Tr.f(2798, arrayOf<Any>(version))
-  fun gpui_f_kicad_offer_stock_v(version: Any): String = Tr.f(2799, arrayOf<Any>(version))
-  val gpui_f_kicad_offer_stock: String get() = Tr.s(2800)
-  fun gpui_f_kicad_offer_old_v(version: Any): String = Tr.f(2801, arrayOf<Any>(version))
-  val gpui_f_kicad_offer_old: String get() = Tr.s(2802)
-  fun gpui_f_kicad_offer_broken_v(version: Any): String = Tr.f(2803, arrayOf<Any>(version))
-  val gpui_f_kicad_offer_broken: String get() = Tr.s(2804)
-  fun gpui_f_kicad_nopackage(computer: Any): String = Tr.f(2805, arrayOf<Any>(computer))
-  fun gpui_f_kicad_found_stock_v(version: Any, cli: Any): String = Tr.f(2806, arrayOf<Any>(version, cli))
-  fun gpui_f_kicad_found_stock(cli: Any): String = Tr.f(2807, arrayOf<Any>(cli))
-  fun gpui_f_kicad_found_v(version: Any, cli: Any): String = Tr.f(2808, arrayOf<Any>(version, cli))
-  fun gpui_f_kicad_found_plain(cli: Any): String = Tr.f(2809, arrayOf<Any>(cli))
-  val gpui_f_kicad_found: String get() = Tr.s(2810)
-  val gpui_f_stock_kicad: String get() = Tr.s(2811)
-  val gpui_f_stock_kicad_note: String get() = Tr.s(2812)
-  val gpui_f_download_kicad: String get() = Tr.s(2813)
-  val gpui_f_locate: String get() = Tr.s(2814)
-  val gpui_f_locate_kicad: String get() = Tr.s(2815)
-  val gpui_f_use_path: String get() = Tr.s(2816)
-  val gpui_f_hint_kicad: String get() = Tr.s(2817)
-  val gpui_f_freecad_body: String get() = Tr.s(2818)
-  val gpui_f_locate_freecad: String get() = Tr.s(2819)
-  val gpui_f_hint_freecad: String get() = Tr.s(2820)
-  val gpui_f_debian: String get() = Tr.s(2821)
-  val gpui_f_local_code: String get() = Tr.s(2822)
-  val gpui_f_only_this: String get() = Tr.s(2823)
-  val gpui_f_machine_title: String get() = Tr.s(2824)
-  val gpui_f_machine_body: String get() = Tr.s(2825)
-  val gpui_f_ts_on: String get() = Tr.s(2826)
-  val gpui_f_ts_off: String get() = Tr.s(2827)
-  val gpui_f_ts_none: String get() = Tr.s(2828)
-  val gpui_f_linked_machines: String get() = Tr.s(2829)
-  val gpui_f_none_yet: String get() = Tr.s(2830)
-  fun gpui_f_n_linked(n: Number): String = Tr.f(2831, arrayOf<Any>(n))
-  val gpui_f_phone_title: String get() = Tr.s(2832)
-  val gpui_f_phone_body: String get() = Tr.s(2833)
-  val gpui_f_pairing_link: String get() = Tr.s(2834)
-  val gpui_f_make_another: String get() = Tr.s(2835)
-  fun gpui_f_short_code(code: Any): String = Tr.f(2836, arrayOf<Any>(code))
-  val gpui_f_add_device: String get() = Tr.s(2837)
-  fun gpui_f_invite_failed(e: Any): String = Tr.f(2838, arrayOf<Any>(e))
-  val gpui_f_invite_note: String get() = Tr.s(2839)
-  val gpui_f_show_qr: String get() = Tr.s(2840)
-  val gpui_f_android_app: String get() = Tr.s(2841)
-  val gpui_f_android_note: String get() = Tr.s(2842)
-  val gpui_f_download_apk: String get() = Tr.s(2843)
-  val gpui_f_iphone_app: String get() = Tr.s(2844)
-  val gpui_f_iphone_note: String get() = Tr.s(2845)
-  val gpui_f_ts_phone: String get() = Tr.s(2846)
-  val gpui_f_ts_phone_note: String get() = Tr.s(2847)
-  val gpui_f_app_store: String get() = Tr.s(2848)
-  val gpui_f_google_play: String get() = Tr.s(2849)
-  val gpui_f_paired_devices: String get() = Tr.s(2850)
-  fun gpui_f_n_paired(n: Number): String = Tr.f(2851, arrayOf<Any>(n))
-  val gpui_f_remote_title: String get() = Tr.s(2852)
-  val gpui_f_cont_on: String get() = Tr.s(2853)
-  val gpui_f_cont_off: String get() = Tr.s(2854)
-  val gpui_f_remote_body_package: String get() = Tr.s(2855)
-  fun gpui_f_remote_body_channel(channel: Any): String = Tr.f(2856, arrayOf<Any>(channel))
-  val gpui_f_cont_restart: String get() = Tr.s(2857)
-  val gpui_f_open_page: String get() = Tr.s(2858)
-  val gpui_f_open_page_note: String get() = Tr.s(2859)
-  val gpui_f_network_updates: String get() = Tr.s(2860)
-  val gpui_f_project_title: String get() = Tr.s(2861)
-  val gpui_f_project_body: String get() = Tr.s(2862)
-  val gpui_f_add_another: String get() = Tr.s(2863)
-  val gpui_f_path_folder: String get() = Tr.s(2864)
-  val gpui_f_add_project: String get() = Tr.s(2865)
-  val gpui_f_create_project: String get() = Tr.s(2866)
-  val gpui_f_full_path: String get() = Tr.s(2867)
-  val gpui_f_thread_title: String get() = Tr.s(2868)
-  val gpui_f_thread_body: String get() = Tr.s(2869)
-  fun gpui_f_new_thread_in(project: Any): String = Tr.f(2870, arrayOf<Any>(project))
-  val gpui_f_new_thread_note: String get() = Tr.s(2871)
-  val gpui_f_start_thread: String get() = Tr.s(2872)
-  val gpui_f_first_message: String get() = Tr.s(2873)
-  val gpui_f_project_first: String get() = Tr.s(2874)
-  val gpui_f_go_project: String get() = Tr.s(2875)
-  fun gpui_f_n_so_far(n: Number): String = Tr.f(2876, arrayOf<Any>(n))
-  val gpui_f_tour_viewers: String get() = Tr.s(2877)
-  val gpui_f_tour_viewers_body: String get() = Tr.s(2878)
-  val gpui_f_key_side: String get() = Tr.s(2879)
-  val gpui_f_key_diff: String get() = Tr.s(2880)
-  val gpui_f_tour_threed: String get() = Tr.s(2881)
-  val gpui_f_tour_threed_body: String get() = Tr.s(2882)
-  val gpui_f_key_threed: String get() = Tr.s(2883)
-  val gpui_f_tour_mech: String get() = Tr.s(2884)
-  val gpui_f_tour_mech_body: String get() = Tr.s(2885)
-  val gpui_f_tour_browser_body: String get() = Tr.s(2886)
-  val gpui_f_tour_thread: String get() = Tr.s(2887)
-  fun gpui_f_tour_thread_body(m: Any): String = Tr.f(2888, arrayOf<Any>(m))
-  val gpui_f_tour_bots_body: String get() = Tr.s(2889)
-  val gpui_f_make_bot: String get() = Tr.s(2890)
-  val gpui_f_opens_form: String get() = Tr.s(2891)
-  val gpui_f_new_bot: String get() = Tr.s(2892)
-  val gpui_f_tour_space: String get() = Tr.s(2893)
-  val gpui_f_tour_space_body: String get() = Tr.s(2894)
-  val gpui_f_tour_rooms_body: String get() = Tr.s(2895)
-  val gpui_f_make_room: String get() = Tr.s(2896)
-  val gpui_f_new_room: String get() = Tr.s(2897)
-  val gpui_f_tour_routines_body: String get() = Tr.s(2898)
-  val gpui_f_tour_palette: String get() = Tr.s(2899)
-  fun gpui_f_tour_palette_body(m: Any): String = Tr.f(2900, arrayOf<Any>(m))
-  val gpui_f_key_agent: String get() = Tr.s(2901)
-  val gpui_f_key_prevnext: String get() = Tr.s(2902)
-  fun gpui_f_key_prevnext_keys(m: Any): String = Tr.f(2903, arrayOf<Any>(m))
-  val gpui_f_key_uber: String get() = Tr.s(2904)
-  val gpui_f_try_it: String get() = Tr.s(2905)
-  val gpui_f_try_palette: String get() = Tr.s(2906)
-  val gpui_f_open_palette: String get() = Tr.s(2907)
-  val gpui_f_try_settings: String get() = Tr.s(2908)
-  val gpui_f_open_settings: String get() = Tr.s(2909)
-  fun gpui_f_tour_settings_body(pages: Any): String = Tr.f(2910, arrayOf<Any>(pages))
-  val gpui_f_uber_title: String get() = Tr.s(2911)
-  fun gpui_f_uber_is(name: Any): String = Tr.f(2912, arrayOf<Any>(name))
-  val gpui_f_uber_pick: String get() = Tr.s(2913)
-  val gpui_f_uber_create: String get() = Tr.s(2914)
-  fun gpui_f_uber_make(name: Any): String = Tr.f(2915, arrayOf<Any>(name))
-  val gpui_f_uber_create_btn: String get() = Tr.s(2916)
-  val gpui_f_all_set: String get() = Tr.s(2917)
-  val gpui_f_still_open: String get() = Tr.s(2918)
-  val gpui_f_skipped_dot: String get() = Tr.s(2919)
-  val gpui_f_not_done_dot: String get() = Tr.s(2920)
-  val gpui_f_skipped: String get() = Tr.s(2921)
-  val gpui_f_not_done: String get() = Tr.s(2922)
-  val gpui_f_setup_finished: String get() = Tr.s(2923)
-  fun gpui_f_setup_finished_note(d: Number, n: Number): String = Tr.f(2924, arrayOf<Any>(d, n))
-  val gpui_f_run_again: String get() = Tr.s(2925)
-  val gpui_f_setup_unfinished: String get() = Tr.s(2926)
-  val gpui_f_resume: String get() = Tr.s(2927)
-  val gpui_f_start_again: String get() = Tr.s(2928)
-  val gpui_f_setup_note: String get() = Tr.s(2929)
-  val gpui_f_run_setup: String get() = Tr.s(2930)
-  val gpui_f_name_bpkicad: String get() = Tr.s(2931)
-  val gpui_f_name_kicad: String get() = Tr.s(2932)
-  val gpui_f_name_freecad: String get() = Tr.s(2933)
-  val gpui_f_name_claude: String get() = Tr.s(2934)
-  val gpui_f_name_codex: String get() = Tr.s(2935)
-  val gpui_f_name_grok: String get() = Tr.s(2936)
-  val gpui_f_name_muse: String get() = Tr.s(2937)
-  val gpui_f_name_opencode: String get() = Tr.s(2938)
-  val gpui_f_name_pi: String get() = Tr.s(2939)
-  val gpui_f_name_omp: String get() = Tr.s(2940)
-  val gpui_f_name_fedora: String get() = Tr.s(2941)
-  val gpui_f_name_arch: String get() = Tr.s(2942)
-  val gpui_f_name_homebrew: String get() = Tr.s(2943)
-  val gpui_f_name_winget: String get() = Tr.s(2944)
-  fun gpui_f_fold_tools(n: Number, tools: Any): String = Tr.f(2945, arrayOf<Any>(n, tools))
-  fun gpui_f_fold_tools_steps(n: Number, tools: Any, d: Number): String = Tr.f(2946, arrayOf<Any>(n, tools, d))
-  fun gpui_f_fold_steps(n: Number, d: Number): String = Tr.f(2947, arrayOf<Any>(n, d))
-  fun gpui_f_fold_live(n: Number, what: Any): String = Tr.f(2948, arrayOf<Any>(n, what))
-  fun gpui_f_fold_live_steps(n: Number, d: Number, what: Any): String = Tr.f(2949, arrayOf<Any>(n, d, what))
-  val gpui_f_restart: String get() = Tr.s(2950)
-  val gpui_f_not_read: String get() = Tr.s(2951)
-  val gpui_f_needs: String get() = Tr.s(2952)
-  fun gpui_f_needs_head(head: Any): String = Tr.f(2953, arrayOf<Any>(head))
-  val gpui_f_type_here: String get() = Tr.s(2954)
-  val gpui_f_or_type: String get() = Tr.s(2955)
-  val gpui_f_quote_files: String get() = Tr.s(2956)
-  val gpui_f_dictate: String get() = Tr.s(2957)
-  val gpui_f_inactive: String get() = Tr.s(2958)
-  fun gpui_f_tool_runs_nover(name: Any, path: Any): String = Tr.f(2959, arrayOf<Any>(name, path))
-  val gpui_f2_aon_boat_learn: String get() = Tr.s(2960)
-  val gpui_f2_uberbot_what: String get() = Tr.s(2961)
-  val gpui_acct_account_name_optional: String get() = Tr.s(2962)
-  val gpui_follow_button: String get() = Tr.s(2963)
-  val gpui_follow_button_tip: String get() = Tr.s(2964)
-  fun gpui_follow_route(page: Any, net: Any, near: Any): String = Tr.f(2965, arrayOf<Any>(page, net, near))
-  fun gpui_follow_edit(page: Any, what: Any): String = Tr.f(2966, arrayOf<Any>(page, what))
-  fun gpui_follow_near(ref: Any): String = Tr.f(2967, arrayOf<Any>(ref))
-  val gpui_follow_wait: String get() = Tr.s(2968)
-  val gpui_follow_paused: String get() = Tr.s(2969)
-  val gpui_follow_resume: String get() = Tr.s(2970)
-  fun gpui_follow_held(page: Any): String = Tr.f(2971, arrayOf<Any>(page))
-  val android_mgmt_all: String get() = Tr.s(2972)
-  val android_mgmt_judged: String get() = Tr.s(2973)
-  val android_mgmt_fix: String get() = Tr.s(2974)
-  val android_mgmt_sent: String get() = Tr.s(2975)
-  val android_mcp: String get() = Tr.s(2976)
-  val android_alerts_ask: String get() = Tr.s(2977)
-  val android_alerts_allow: String get() = Tr.s(2978)
-  val android_alerts_later: String get() = Tr.s(2979)
-  val android_viewerbg: String get() = Tr.s(2980)
-  val android_viewerbg_auto: String get() = Tr.s(2981)
-  val android_viewerbg_light: String get() = Tr.s(2982)
-  val android_viewerbg_dark: String get() = Tr.s(2983)
-  val android_viewerbg_custom: String get() = Tr.s(2984)
-  val android_viewerbg_hex: String get() = Tr.s(2985)
-  val android_viewerbg_note: String get() = Tr.s(2986)
-  val android_state_working: String get() = Tr.s(2987)
-  val android_state_inactive: String get() = Tr.s(2988)
-  val android_state_finished: String get() = Tr.s(2989)
-  val android_state_settled: String get() = Tr.s(2990)
-  val android_state_stalled: String get() = Tr.s(2991)
-  val android_state_monitoring: String get() = Tr.s(2992)
-  val android_ago_now: String get() = Tr.s(2993)
-  fun android_ago_m(n: Any): String = Tr.f(2994, arrayOf<Any>(n))
-  fun android_ago_h(n: Any): String = Tr.f(2995, arrayOf<Any>(n))
-  fun android_ago_d(n: Any): String = Tr.f(2996, arrayOf<Any>(n))
-  val android_room_gone: String get() = Tr.s(2997)
-  fun android_conn_connecting(hub: Any): String = Tr.f(2998, arrayOf<Any>(hub))
-  val android_conn_offline: String get() = Tr.s(2999)
-  val android_hub: String get() = Tr.s(3000)
-  val android_hub_add: String get() = Tr.s(3001)
-  val android_pair_repair: String get() = Tr.s(3002)
-  val android_pair_revoked: String get() = Tr.s(3003)
-  val android_pair_paste: String get() = Tr.s(3004)
-  val android_pair_photo: String get() = Tr.s(3005)
-  val android_pair_other: String get() = Tr.s(3006)
-  val android_pair_code_lead: String get() = Tr.s(3007)
-  val android_pair_code: String get() = Tr.s(3008)
-  val android_pair_code_bad: String get() = Tr.s(3009)
-  val android_pair_link_bad: String get() = Tr.s(3010)
-  val android_pair_ask: String get() = Tr.s(3011)
-  val android_pair_ask_note: String get() = Tr.s(3012)
-  val android_terminals: String get() = Tr.s(3013)
-  val android_search_hint: String get() = Tr.s(3014)
-  val android_projects_none: String get() = Tr.s(3015)
-  val android_project_add: String get() = Tr.s(3016)
-  val android_kind_uberbot: String get() = Tr.s(3017)
-  val android_kind_bot: String get() = Tr.s(3018)
-  val android_kind_room: String get() = Tr.s(3019)
-  fun android_thread_new_in(project: Any): String = Tr.f(3020, arrayOf<Any>(project))
-  val android_threads_none: String get() = Tr.s(3021)
-  fun android_kids_hide(n: Number): String = Tr.f(3022, arrayOf<Any>(n))
-  fun android_kids_show(n: Number): String = Tr.f(3023, arrayOf<Any>(n))
-  fun android_work_head(word: Any): String = Tr.f(3024, arrayOf<Any>(word))
-  fun android_lock_waiting(n: Any): String = Tr.f(3025, arrayOf<Any>(n))
-  val android_state_head: String get() = Tr.s(3026)
-  val android_unsettle: String get() = Tr.s(3027)
-  val android_mic_off: String get() = Tr.s(3028)
-  val android_picture_bad: String get() = Tr.s(3029)
-  val android_buy_failed: String get() = Tr.s(3030)
-  val android_photo_bad: String get() = Tr.s(3031)
-  val android_camera_failed: String get() = Tr.s(3032)
-  val android_camera_off: String get() = Tr.s(3033)
-  val android_message_gone: String get() = Tr.s(3034)
-  val android_load_earlier: String get() = Tr.s(3035)
-  val android_thread_empty: String get() = Tr.s(3036)
-  val android_composer_hint: String get() = Tr.s(3037)
-  val android_pictures_old: String get() = Tr.s(3038)
-  val android_photo_choose: String get() = Tr.s(3039)
-  val android_photo_take: String get() = Tr.s(3040)
-  val android_failed_generic: String get() = Tr.s(3041)
-  val android_secret_new: String get() = Tr.s(3042)
-  fun android_secret_named(name: Any): String = Tr.f(3043, arrayOf<Any>(name))
-  val android_secret_paste: String get() = Tr.s(3044)
-  val android_secret_refused: String get() = Tr.s(3045)
-  val android_secret_notneeded: String get() = Tr.s(3046)
-  val android_send_retry: String get() = Tr.s(3047)
-  val android_ask_open: String get() = Tr.s(3048)
-  val android_ask_done: String get() = Tr.s(3049)
-  val android_ask_answer: String get() = Tr.s(3050)
-  fun android_ask_answered(answer: Any): String = Tr.f(3051, arrayOf<Any>(answer))
-  val android_hub_use: String get() = Tr.s(3052)
-  val native_hub_home: String get() = Tr.s(3053)
-  val native_hub_unreachable: String get() = Tr.s(3054)
-  val android_online: String get() = Tr.s(3055)
-  fun android_offline(why: Any): String = Tr.f(3056, arrayOf<Any>(why))
-  val android_accounts: String get() = Tr.s(3057)
-  fun android_hub_forget_ask(hub: Any): String = Tr.f(3058, arrayOf<Any>(hub))
-  val android_hub_forget_note: String get() = Tr.s(3059)
-  val android_improve: String get() = Tr.s(3060)
-  val android_alerts_head: String get() = Tr.s(3061)
-  val android_alerts_note: String get() = Tr.s(3062)
-  val android_quiet_head: String get() = Tr.s(3063)
-  fun android_quiet_range(from: Any, to: Any): String = Tr.f(3064, arrayOf<Any>(from, to))
-  val android_urgent_head: String get() = Tr.s(3065)
-  val android_quiet_note: String get() = Tr.s(3066)
-  val android_unpair: String get() = Tr.s(3067)
-  val android_updates_head: String get() = Tr.s(3068)
-  val android_option_beta: String get() = Tr.s(3069)
-  val android_folder_use: String get() = Tr.s(3070)
-  fun android_thread_new_title(project: Any): String = Tr.f(3071, arrayOf<Any>(project))
-  val android_thread_new_hint: String get() = Tr.s(3072)
-  val android_start: String get() = Tr.s(3073)
-  val android_improve_ask: String get() = Tr.s(3074)
-  val android_improve_note: String get() = Tr.s(3075)
-  val android_improve_github: String get() = Tr.s(3076)
-  val android_project_head: String get() = Tr.s(3077)
-  val android_improve_thread: String get() = Tr.s(3078)
-  val android_improve_sent: String get() = Tr.s(3079)
-  val android_order_head: String get() = Tr.s(3080)
-  fun android_order_named(name: Any): String = Tr.f(3081, arrayOf<Any>(name))
-  val android_buy_now: String get() = Tr.s(3082)
-  val android_design_change: String get() = Tr.s(3083)
-  val android_live_working: String get() = Tr.s(3084)
-  fun android_live_count(n: Number): String = Tr.f(3085, arrayOf<Any>(n))
-  val android_connecting: String get() = Tr.s(3086)
-  val android_hub_unreachable: String get() = Tr.s(3087)
-  val android_pair_code_address: String get() = Tr.s(3088)
-  val android_pair_link_partial: String get() = Tr.s(3089)
-  val android_pair_link_none: String get() = Tr.s(3090)
-  fun android_fail_http(code: Any): String = Tr.f(3091, arrayOf<Any>(code))
-  fun android_fail_reach(hub: Any): String = Tr.f(3092, arrayOf<Any>(hub))
-  fun android_fail_timeout(hub: Any): String = Tr.f(3093, arrayOf<Any>(hub))
-  fun android_fail_dns(hub: Any): String = Tr.f(3094, arrayOf<Any>(hub))
-  val android_offline_word: String get() = Tr.s(3095)
-  val android_offline_cap: String get() = Tr.s(3096)
-  val android_proto_old: String get() = Tr.s(3097)
-  val android_hub_refused: String get() = Tr.s(3098)
-  val android_hub_noanswer: String get() = Tr.s(3099)
-  val android_thinking: String get() = Tr.s(3100)
-  val android_buy_it: String get() = Tr.s(3101)
-  val android_layers: String get() = Tr.s(3102)
-  val android_link_old: String get() = Tr.s(3103)
-  val android_link_nohere: String get() = Tr.s(3104)
-  val android_link_failed: String get() = Tr.s(3105)
-  val android_link_offline: String get() = Tr.s(3106)
-  val android_copied: String get() = Tr.s(3107)
-  fun android_history_title(n: Any): String = Tr.f(3108, arrayOf<Any>(n))
-  fun android_settled_title(n: Any): String = Tr.f(3109, arrayOf<Any>(n))
-  val android_dictate: String get() = Tr.s(3110)
-  val android_voice_spelling: String get() = Tr.s(3111)
-  val android_voice_head: String get() = Tr.s(3112)
-  val android_link_noapp: String get() = Tr.s(3113)
-  val android_star: String get() = Tr.s(3114)
-  val android_rescue_restart: String get() = Tr.s(3115)
-  val android_rescue_pairing: String get() = Tr.s(3116)
-  val android_rescue_asking: String get() = Tr.s(3117)
-  val android_rescue_norestart: String get() = Tr.s(3118)
-  val android_rescue_nostatus: String get() = Tr.s(3119)
-  val android_rescue_sent: String get() = Tr.s(3120)
-  val android_rescue_refused: String get() = Tr.s(3121)
-  val android_rescue_old: String get() = Tr.s(3122)
-  val android_rescue_unreachable: String get() = Tr.s(3123)
-  val android_rescue_noanswer: String get() = Tr.s(3124)
-  fun android_rescue_still(status: Any): String = Tr.f(3125, arrayOf<Any>(status))
-  val android_rescue_waiting: String get() = Tr.s(3126)
-  fun android_rescue_is(status: Any): String = Tr.f(3127, arrayOf<Any>(status))
-  val android_rescue_down: String get() = Tr.s(3128)
-  val android_rescue_safedegraded: String get() = Tr.s(3129)
-  val android_rescue_degraded: String get() = Tr.s(3130)
-  val android_rescue_safe: String get() = Tr.s(3131)
-  val android_rescue_up: String get() = Tr.s(3132)
-  val android_pair_local: String get() = Tr.s(3133)
-  val android_pair_wrong: String get() = Tr.s(3134)
-  val android_pair_expired: String get() = Tr.s(3135)
-  val android_pair_used: String get() = Tr.s(3136)
-  val android_pair_revokedcode: String get() = Tr.s(3137)
-  val android_pair_limited: String get() = Tr.s(3138)
-  val android_pair_required: String get() = Tr.s(3139)
-  val android_pair_unreachable: String get() = Tr.s(3140)
-  val android_pad_pen_hint: String get() = Tr.s(3141)
-  val android_pad_box_hint: String get() = Tr.s(3142)
-  val android_pad_eraser_hint: String get() = Tr.s(3143)
-  val android_pad_pen: String get() = Tr.s(3144)
-  val android_pad_box: String get() = Tr.s(3145)
-  val android_pad_eraser: String get() = Tr.s(3146)
-  val android_pad_paper: String get() = Tr.s(3147)
-  val android_undo: String get() = Tr.s(3148)
-  val android_pad_length: String get() = Tr.s(3149)
-  val android_machines_head: String get() = Tr.s(3150)
-  val android_devices_head: String get() = Tr.s(3151)
-  val android_mic_failed: String get() = Tr.s(3152)
-  val android_dictation_failed: String get() = Tr.s(3153)
-  val android_paste: String get() = Tr.s(3154)
-  val android_term_copy: String get() = Tr.s(3155)
-  fun android_terminals_in(project: Any): String = Tr.f(3156, arrayOf<Any>(project))
-  val android_term_new: String get() = Tr.s(3157)
-  val android_terms_none: String get() = Tr.s(3158)
-  val android_term_failed: String get() = Tr.s(3159)
-  fun android_term_exited(code: Any): String = Tr.f(3160, arrayOf<Any>(code))
-  val android_term_kind_shell: String get() = Tr.s(3161)
-  fun android_mesh_previous(why: Any): String = Tr.f(3162, arrayOf<Any>(why))
-  val android_mesh_decoding: String get() = Tr.s(3163)
-  val android_mesh_bad: String get() = Tr.s(3164)
-  val android_viewer_a11y: String get() = Tr.s(3165)
-  val android_search_inthread: String get() = Tr.s(3166)
-  val android_thread_detach: String get() = Tr.s(3167)
-  val android_delete_more: String get() = Tr.s(3168)
-  val android_thread_rename: String get() = Tr.s(3169)
-  fun android_thread_delete_ask(title: Any): String = Tr.f(3170, arrayOf<Any>(title))
-  val android_thread_delete: String get() = Tr.s(3171)
-  val android_keep: String get() = Tr.s(3172)
-  val android_badge_more: String get() = Tr.s(3173)
-  val android_project_remove_more: String get() = Tr.s(3174)
-  val android_project_rename: String get() = Tr.s(3175)
-  fun android_project_remove_ask(title: Any): String = Tr.f(3176, arrayOf<Any>(title))
-  val android_searching: String get() = Tr.s(3177)
-  fun android_search_none(q: Any): String = Tr.f(3178, arrayOf<Any>(q))
-  fun android_search_project(title: Any): String = Tr.f(3179, arrayOf<Any>(title))
-  val android_history_head: String get() = Tr.s(3180)
-  val android_done: String get() = Tr.s(3181)
-  val android_you: String get() = Tr.s(3182)
-  val android_agent: String get() = Tr.s(3183)
-  fun android_room_post_to(room: Any): String = Tr.f(3184, arrayOf<Any>(room))
-  val android_post: String get() = Tr.s(3185)
-  val android_find_head: String get() = Tr.s(3186)
-  val android_find_hint: String get() = Tr.s(3187)
-  fun android_find_none(q: Any): String = Tr.f(3188, arrayOf<Any>(q))
-  val android_accounts_none: String get() = Tr.s(3189)
-  val android_account_name_hint: String get() = Tr.s(3190)
-  val android_account_add: String get() = Tr.s(3191)
-  val android_account: String get() = Tr.s(3192)
-  val android_signin_open: String get() = Tr.s(3193)
-  val android_copy_code: String get() = Tr.s(3194)
-  val android_code_paste: String get() = Tr.s(3195)
-  val android_code_send: String get() = Tr.s(3196)
-  val android_viewer_split: String get() = Tr.s(3197)
-  fun android_viewer_title(title: Any): String = Tr.f(3198, arrayOf<Any>(title))
-  val android_viewer_board: String get() = Tr.s(3199)
-  val android_viewer_boards: String get() = Tr.s(3200)
-  val android_viewer_sheet: String get() = Tr.s(3201)
-  val android_viewer_sheets: String get() = Tr.s(3202)
-  fun android_viewer_sheets_n(n: Number): String = Tr.f(3203, arrayOf<Any>(n))
-  fun ios_viewer_sheets_n(n: Number): String = Tr.f(3204, arrayOf<Any>(n))
-  val android_viewer_change: String get() = Tr.s(3205)
-  val android_viewer_find: String get() = Tr.s(3206)
-  val android_viewer_noboard: String get() = Tr.s(3207)
-  val android_viewer_nosch: String get() = Tr.s(3208)
-  fun android_viewer_piece(at: Any): String = Tr.f(3209, arrayOf<Any>(at))
-  val android_viewer_loading3d: String get() = Tr.s(3210)
-  val android_compare_close: String get() = Tr.s(3211)
-  val android_compare_none: String get() = Tr.s(3212)
-  val android_mech_none: String get() = Tr.s(3213)
-  val android_folder_empty: String get() = Tr.s(3214)
-  val android_file_bad: String get() = Tr.s(3215)
-  val android_file_noimage: String get() = Tr.s(3216)
-  fun android_file_nopreview(size: Any): String = Tr.f(3217, arrayOf<Any>(size))
-  val android_pdf_bad: String get() = Tr.s(3218)
-  fun android_pdf_page(n: Any, total: Any): String = Tr.f(3219, arrayOf<Any>(n, total))
-  val android_browser_takeover: String get() = Tr.s(3220)
-  val android_browser_keys: String get() = Tr.s(3221)
-  val android_browser_handback: String get() = Tr.s(3222)
-  val android_browser_page: String get() = Tr.s(3223)
-  val android_browser_none: String get() = Tr.s(3224)
-  val android_browser_driving: String get() = Tr.s(3225)
-  val android_changes_head: String get() = Tr.s(3226)
-  val android_diff_nogit: String get() = Tr.s(3227)
-  val android_diff_none: String get() = Tr.s(3228)
-  val android_checks_run: String get() = Tr.s(3229)
-  val android_nothing: String get() = Tr.s(3230)
-  val android_comments_none: String get() = Tr.s(3231)
-  val android_resolved: String get() = Tr.s(3232)
-  val android_reopen: String get() = Tr.s(3233)
-  val android_resolve: String get() = Tr.s(3234)
-  val android_comment_hint: String get() = Tr.s(3235)
-  fun android_probe_lit(n: Any): String = Tr.f(3236, arrayOf<Any>(n))
-  fun android_fold_running(what: Any): String = Tr.f(3237, arrayOf<Any>(what))
-  val android_hub_voice_unsupported_here: String get() = Tr.s(3238)
-  val android_hub_voice_mic_note_plain: String get() = Tr.s(3239)
-  fun android_hub_voice_mic_note_default(device: Any): String = Tr.f(3240, arrayOf<Any>(device))
-  fun android_hub_voice_mic_note(device: Any): String = Tr.f(3241, arrayOf<Any>(device))
-  val android_hub_voice_engine_pending: String get() = Tr.s(3242)
-  val android_hub_voice_dict_empty: String get() = Tr.s(3243)
-  val android_hub_voice_learned_empty: String get() = Tr.s(3244)
-  val android_hub_voice_pebble: String get() = Tr.s(3245)
-  val android_hub_voice_pebble_note: String get() = Tr.s(3246)
-  val android_hub_voice_noaudio_mic: String get() = Tr.s(3247)
-  val android_hub_voice_silent_mic: String get() = Tr.s(3248)
-  val android_hub_voice_skip: String get() = Tr.s(3249)
-  fun android_hub_voice_heard_many(word: Any, count: Any): String = Tr.f(3250, arrayOf<Any>(word, count))
-  fun android_hub_voice_dropped(heard: Any): String = Tr.f(3251, arrayOf<Any>(heard))
-  val android_hub_voice_err_copy: String get() = Tr.s(3252)
-  val android_hub_voice_err_busy: String get() = Tr.s(3253)
-  val android_hub_voice_err_setting: String get() = Tr.s(3254)
-  val android_hub_voice_err_action: String get() = Tr.s(3255)
-  val android_hub_voice_err_request: String get() = Tr.s(3256)
-  val android_hub_voice_err_term: String get() = Tr.s(3257)
-  val android_hub_voice_err_key: String get() = Tr.s(3258)
-  val android_hub_voice_err_write: String get() = Tr.s(3259)
-  val android_hub_voice_err_start: String get() = Tr.s(3260)
-  val android_hub_voice_err_stopped: String get() = Tr.s(3261)
-  val android_hub_voice_err_missing: String get() = Tr.s(3262)
-  fun android_hub_entry_step_files(files: Any): String = Tr.f(3263, arrayOf<Any>(files))
-  fun android_hub_entry_step_base(files: Any): String = Tr.f(3264, arrayOf<Any>(files))
-  val android_hub_entry_noreason: String get() = Tr.s(3265)
-  val android_hub_entry_retired: String get() = Tr.s(3266)
-  fun android_hub_viewer_layer(name: Any): String = Tr.f(3267, arrayOf<Any>(name))
-  val android_hub_viewer_pads: String get() = Tr.s(3268)
-  val android_hub_viewer_vias: String get() = Tr.s(3269)
-  val android_hub_viewer_holes: String get() = Tr.s(3270)
-  val android_hub_viewer_margin: String get() = Tr.s(3271)
-  val android_hub_viewer_sch_page: String get() = Tr.s(3272)
-  val android_hub_viewer_sch_sheetfill: String get() = Tr.s(3273)
-  val android_hub_viewer_sch_bodyfill: String get() = Tr.s(3274)
-  val android_hub_viewer_sch_graphic: String get() = Tr.s(3275)
-  val android_hub_viewer_sch_note: String get() = Tr.s(3276)
-  val android_hub_viewer_sch_body: String get() = Tr.s(3277)
-  val android_hub_viewer_sch_pin: String get() = Tr.s(3278)
-  val android_hub_viewer_sch_pinname: String get() = Tr.s(3279)
-  val android_hub_viewer_sch_pinnumber: String get() = Tr.s(3280)
-  val android_hub_viewer_sch_field: String get() = Tr.s(3281)
-  val android_hub_viewer_sch_fieldother: String get() = Tr.s(3282)
-  val android_hub_viewer_sch_bus: String get() = Tr.s(3283)
-  val android_hub_viewer_sch_busentry: String get() = Tr.s(3284)
-  val android_hub_viewer_sch_wire: String get() = Tr.s(3285)
-  val android_hub_viewer_sch_noconnect: String get() = Tr.s(3286)
-  val android_hub_viewer_sch_junction: String get() = Tr.s(3287)
-  val android_hub_viewer_sch_sheetname: String get() = Tr.s(3288)
-  val android_hub_viewer_sch_sheetfile: String get() = Tr.s(3289)
-  val android_hub_viewer_sch_dnp: String get() = Tr.s(3290)
-  val android_hub_review_nokicad: String get() = Tr.s(3291)
-  val android_hub_review_wait: String get() = Tr.s(3292)
-  val android_hub_review_nosch: String get() = Tr.s(3293)
-  val android_hub_review_nofindings: String get() = Tr.s(3294)
-  fun android_hub_review_unticked(n: Any): String = Tr.f(3295, arrayOf<Any>(n))
-  fun android_hub_review_customfailed(n: Any): String = Tr.f(3296, arrayOf<Any>(n))
-  val android_hub_review_runthem: String get() = Tr.s(3297)
-  val android_hub_err_thread: String get() = Tr.s(3298)
-  val android_hub_err_project: String get() = Tr.s(3299)
-  val android_hub_err_room: String get() = Tr.s(3300)
-  val android_hub_err_method: String get() = Tr.s(3301)
-  val android_hub_err_attachment: String get() = Tr.s(3302)
-  val android_hub_err_noanswer: String get() = Tr.s(3303)
-  val android_hub_err_empty: String get() = Tr.s(3304)
-  val android_hub_err_oldapp: String get() = Tr.s(3305)
-  val android_hub_err_clientid: String get() = Tr.s(3306)
-  fun android_hub_err_images_max(n: Any): String = Tr.f(3307, arrayOf<Any>(n))
-  val android_hub_err_images_kind: String get() = Tr.s(3308)
-  val android_hub_err_images_base64: String get() = Tr.s(3309)
-  val android_hub_err_images_size: String get() = Tr.s(3310)
-  val android_hub_err_images_store: String get() = Tr.s(3311)
-  val android_hub_err_folder_none: String get() = Tr.s(3312)
-  val android_hub_err_folder_read: String get() = Tr.s(3313)
-  val android_hub_err_notadded: String get() = Tr.s(3314)
-  val android_hub_err_nothread: String get() = Tr.s(3315)
-  val android_hub_err_env: String get() = Tr.s(3316)
-  val android_hub_err_channel: String get() = Tr.s(3317)
-  val android_hub_err_topic: String get() = Tr.s(3318)
-  val android_hub_err_tint: String get() = Tr.s(3319)
-  val android_hub_err_usage: String get() = Tr.s(3320)
-  val android_hub_err_nofolder: String get() = Tr.s(3321)
-  val android_hub_err_path: String get() = Tr.s(3322)
-  val android_hub_err_layer: String get() = Tr.s(3323)
-  val android_hub_err_compare: String get() = Tr.s(3324)
-  val android_hub_err_version: String get() = Tr.s(3325)
-  val android_hub_err_repo: String get() = Tr.s(3326)
-  val android_hub_err_toolbar: String get() = Tr.s(3327)
-  val android_hub_err_page: String get() = Tr.s(3328)
-  val android_hub_err_term_none: String get() = Tr.s(3329)
-  val android_hub_err_term_off: String get() = Tr.s(3330)
-  val android_hub_err_term_stopped: String get() = Tr.s(3331)
-  val android_hub_err_term_many: String get() = Tr.s(3332)
-  val android_hub_err_term_much: String get() = Tr.s(3333)
-  val android_hub_err_term_base64: String get() = Tr.s(3334)
-  val android_hub_err_busy: String get() = Tr.s(3335)
-  val android_hub_err_store: String get() = Tr.s(3336)
-  val android_hub_err_noagent: String get() = Tr.s(3337)
-  val android_hub_err_project_choose: String get() = Tr.s(3338)
-  val android_hub_err_project_retry: String get() = Tr.s(3339)
-  val android_hub_err_project_message: String get() = Tr.s(3340)
-  fun android_hub_err_project_already(root: Any): String = Tr.f(3341, arrayOf<Any>(root))
-  fun android_hub_err_project_invalid(path: Any): String = Tr.f(3342, arrayOf<Any>(path))
-  val android_hub_err_project_nofolder: String get() = Tr.s(3343)
-  val android_hub_err_project_unavailable: String get() = Tr.s(3344)
-  val android_hub_err_project_home: String get() = Tr.s(3345)
-  val android_hub_err_folder_gone: String get() = Tr.s(3346)
-  val android_hub_err_notfolder: String get() = Tr.s(3347)
-  val android_hub_err_file: String get() = Tr.s(3348)
-  val android_hub_err_utf8: String get() = Tr.s(3349)
-  val android_hub_err_parent: String get() = Tr.s(3350)
-  val android_hub_err_conversation: String get() = Tr.s(3351)
-  val android_hub_err_account_move: String get() = Tr.s(3352)
-  val android_hub_err_account_turn: String get() = Tr.s(3353)
-  val android_hub_err_account_agent: String get() = Tr.s(3354)
-  val android_hub_err_account_changed: String get() = Tr.s(3355)
-  val android_hub_err_account_none: String get() = Tr.s(3356)
-  val android_hub_err_intent_reload: String get() = Tr.s(3357)
-  val android_hub_err_intent_saving: String get() = Tr.s(3358)
-  val android_hub_err_intent_dir: String get() = Tr.s(3359)
-  val android_hub_err_intent_section: String get() = Tr.s(3360)
-  val android_hub_err_order_off: String get() = Tr.s(3361)
-  val android_hub_err_order_changed: String get() = Tr.s(3362)
-  val android_hub_err_order_upload: String get() = Tr.s(3363)
-  val android_hub_err_machine: String get() = Tr.s(3364)
-  fun android_hub_devices_used_by(name: Any): String = Tr.f(3365, arrayOf<Any>(name))
-  val android_hub_devices_used: String get() = Tr.s(3366)
-  val android_hub_devices_revoked: String get() = Tr.s(3367)
-  fun android_hub_devices_expired(until: Any): String = Tr.f(3368, arrayOf<Any>(until))
-  fun android_hub_devices_invite_failed(error: Any): String = Tr.f(3369, arrayOf<Any>(error))
-  val android_hub_devices_add: String get() = Tr.s(3370)
-  val android_hub_devices_add_note: String get() = Tr.s(3371)
-  val android_hub_devices_retry: String get() = Tr.s(3372)
-  val android_hub_devices_lan: String get() = Tr.s(3373)
-  val android_hub_devices_lan_on: String get() = Tr.s(3374)
-  val android_hub_devices_lan_gone: String get() = Tr.s(3375)
-  fun android_hub_devices_lan_row(url: Any): String = Tr.f(3376, arrayOf<Any>(url))
-  val android_hub_devices_lan_stop: String get() = Tr.s(3377)
-  val android_hub_devices_link_open: String get() = Tr.s(3378)
-  val android_hub_devices_link_used: String get() = Tr.s(3379)
-  fun android_hub_devices_link_open_by(name: Any): String = Tr.f(3380, arrayOf<Any>(name))
-  fun android_hub_devices_link_used_by(name: Any): String = Tr.f(3381, arrayOf<Any>(name))
-  val android_hub_devices_kind_tailnet: String get() = Tr.s(3382)
-  val android_hub_devices_kind_local: String get() = Tr.s(3383)
-  val android_hub_devices_tailnet_note: String get() = Tr.s(3384)
-  val android_hub_devices_lan_note: String get() = Tr.s(3385)
-  val android_hub_devices_reach: String get() = Tr.s(3386)
-  val android_hub_devices_lan_address: String get() = Tr.s(3387)
-  val android_hub_devices_another: String get() = Tr.s(3388)
-  fun android_hub_devices_qrnote(code: Any, hub: Any, until: Any): String = Tr.f(3389, arrayOf<Any>(code, hub, until))
-  fun android_hub_devices_lan_offer(url: Any): String = Tr.f(3390, arrayOf<Any>(url))
-  val android_hub_devices_lan_let: String get() = Tr.s(3391)
-  val android_hub_devices_only: String get() = Tr.s(3392)
-  val android_hub_devices_local_only: String get() = Tr.s(3393)
-  fun android_hub_devices_local_choose(kinds: Any): String = Tr.f(3394, arrayOf<Any>(kinds))
-  fun android_hub_devices_lan_unknown(address: Any): String = Tr.f(3395, arrayOf<Any>(address))
-  val android_hub_devices_lan_copy: String get() = Tr.s(3396)
-  fun android_hub_devices_lan_taken(address: Any): String = Tr.f(3397, arrayOf<Any>(address))
-  val android_hub_devices_err_action: String get() = Tr.s(3398)
-  val android_hub_machines_none: String get() = Tr.s(3399)
-  fun android_hub_machines_paired(url: Any): String = Tr.f(3400, arrayOf<Any>(url))
-  fun android_hub_machines_notyours(url: Any): String = Tr.f(3401, arrayOf<Any>(url))
-  fun android_hub_machines_unpaired(url: Any): String = Tr.f(3402, arrayOf<Any>(url))
-  fun android_hub_machines_via(url: Any, via: Any): String = Tr.f(3403, arrayOf<Any>(url, via))
-  val android_hub_machines_rename: String get() = Tr.s(3404)
-  val android_hub_machines_rename_note: String get() = Tr.s(3405)
-  val android_hub_machines_rename_from: String get() = Tr.s(3406)
-  val android_hub_machines_rename_to: String get() = Tr.s(3407)
-  fun android_hub_machines_wants(name: Any): String = Tr.f(3408, arrayOf<Any>(name))
-  fun android_hub_machines_request(url: Any, check: Any, left: Any): String = Tr.f(3409, arrayOf<Any>(url, check, left))
-  val android_hub_machines_approve: String get() = Tr.s(3410)
-  fun android_hub_machines_waiting(check: Any): String = Tr.f(3411, arrayOf<Any>(check))
-  fun android_hub_machines_pairing(address: Any): String = Tr.f(3412, arrayOf<Any>(address))
-  fun android_hub_machines_status_linked(name: Any): String = Tr.f(3413, arrayOf<Any>(name))
-  fun android_hub_machines_status_refused(error: Any): String = Tr.f(3414, arrayOf<Any>(error))
-  fun android_hub_machines_found(url: Any): String = Tr.f(3415, arrayOf<Any>(url))
-  fun android_hub_machines_found_other(url: Any): String = Tr.f(3416, arrayOf<Any>(url))
-  val android_hub_machines_code_hint: String get() = Tr.s(3417)
-  val android_hub_machines_pair_title: String get() = Tr.s(3418)
-  val android_hub_machines_pair_note: String get() = Tr.s(3419)
-  val android_hub_machines_addr_hint: String get() = Tr.s(3420)
-  val android_hub_machines_code: String get() = Tr.s(3421)
-  val android_hub_machines_code_title: String get() = Tr.s(3422)
-  fun android_hub_machines_code_note(code: Any, address: Any, left: Any): String = Tr.f(3423, arrayOf<Any>(code, address, left))
-  val android_hub_machines_code_another: String get() = Tr.s(3424)
-  val android_hub_machines_make: String get() = Tr.s(3425)
-  val android_hub_machines_make_note: String get() = Tr.s(3426)
-  val android_hub_machines_err_link: String get() = Tr.s(3427)
-  val android_hub_machines_err_which: String get() = Tr.s(3428)
-  fun android_hub_machines_err_called(name: Any): String = Tr.f(3429, arrayOf<Any>(name))
-  fun android_hub_machines_err_taken(name: Any): String = Tr.f(3430, arrayOf<Any>(name))
-  val android_hub_machines_err_invite: String get() = Tr.s(3431)
-  val android_hub_machines_err_codes: String get() = Tr.s(3432)
-  val android_hub_machines_err_record: String get() = Tr.s(3433)
-  val android_hub_machines_err_expired_answered: String get() = Tr.s(3434)
-  val android_hub_machines_err_secret: String get() = Tr.s(3435)
-  val android_hub_machines_err_approval: String get() = Tr.s(3436)
-  val android_hub_machines_err_expired: String get() = Tr.s(3437)
-  val android_hub_machines_err_address: String get() = Tr.s(3438)
-  val android_hub_machines_err_nocode: String get() = Tr.s(3439)
-  val android_hub_machines_err_already: String get() = Tr.s(3440)
-  fun android_hub_machines_err_noanswer(address: Any): String = Tr.f(3441, arrayOf<Any>(address))
-  val android_hub_machines_err_nothing: String get() = Tr.s(3442)
-  val android_hub_machines_err_attempt: String get() = Tr.s(3443)
-  val android_hub_machines_err_invites: String get() = Tr.s(3444)
-  val android_hub_machines_err_invite_record: String get() = Tr.s(3445)
-  val android_hub_machines_err_invite_secret: String get() = Tr.s(3446)
-  val android_hub_machines_err_unusable: String get() = Tr.s(3447)
-  fun android_hub_machines_err_nolink(code: Any, body: Any): String = Tr.f(3448, arrayOf<Any>(code, body))
-  val android_hub_machines_err_notlinked: String get() = Tr.s(3449)
-  val android_hub_machines_err_nocodeback: String get() = Tr.s(3450)
-  fun android_hub_machines_err_nocodegiven(code: Any, body: Any): String = Tr.f(3451, arrayOf<Any>(code, body))
-  val android_hub_accounts_state_connected: String get() = Tr.s(3452)
-  val android_hub_accounts_state_expired: String get() = Tr.s(3453)
-  val android_hub_accounts_state_connecting: String get() = Tr.s(3454)
-  val android_hub_accounts_state_unchecked: String get() = Tr.s(3455)
-  val android_hub_accounts_state_none: String get() = Tr.s(3456)
-  fun android_hub_accounts_limit(window: Any, used: Any): String = Tr.f(3457, arrayOf<Any>(window, used))
-  fun android_hub_accounts_limit_resets(window: Any, used: Any, `when`: Any): String = Tr.f(3458, arrayOf<Any>(window, used, `when`))
-  fun android_hub_accounts_limit_stale(window: Any, used: Any): String = Tr.f(3459, arrayOf<Any>(window, used))
-  fun android_hub_accounts_limit_resets_stale(window: Any, used: Any, `when`: Any): String = Tr.f(3460, arrayOf<Any>(window, used, `when`))
-  fun android_hub_accounts_add(provider: Any): String = Tr.f(3461, arrayOf<Any>(provider))
-  val android_hub_accounts_note: String get() = Tr.s(3462)
-  val android_hub_accounts_signin_starting: String get() = Tr.s(3463)
-  val android_hub_accounts_signin_paste: String get() = Tr.s(3464)
-  val android_hub_accounts_signin_device: String get() = Tr.s(3465)
-  val android_hub_accounts_signin_done: String get() = Tr.s(3466)
-  val android_hub_accounts_signin_expired: String get() = Tr.s(3467)
-  val android_hub_accounts_signin_cancelled: String get() = Tr.s(3468)
-  val android_hub_accounts_signin_failed: String get() = Tr.s(3469)
-  val android_hub_accounts_act_cancel: String get() = Tr.s(3470)
-  val android_hub_accounts_act_again: String get() = Tr.s(3471)
-  val android_hub_accounts_act_signin: String get() = Tr.s(3472)
-  fun android_hub_accounts_remove_ask(label: Any): String = Tr.f(3473, arrayOf<Any>(label))
-  fun android_hub_accounts_hold_resets(`when`: Any): String = Tr.f(3474, arrayOf<Any>(`when`))
-  val android_hub_accounts_hold: String get() = Tr.s(3475)
-  fun android_hub_accounts_alert_expired(provider: Any): String = Tr.f(3476, arrayOf<Any>(provider))
-  fun android_hub_accounts_alert_needed(provider: Any, title: Any, why: Any): String = Tr.f(3477, arrayOf<Any>(provider, title, why))
-  val android_hub_accounts_msg_expired: String get() = Tr.s(3478)
-  val android_hub_accounts_msg_expired_long: String get() = Tr.s(3479)
-  val android_hub_accounts_msg_generic: String get() = Tr.s(3480)
-  val android_hub_accounts_msg_nolimits: String get() = Tr.s(3481)
-  val android_hub_accounts_msg_nowindows: String get() = Tr.s(3482)
-  val android_hub_accounts_msg_signin: String get() = Tr.s(3483)
-  val android_hub_accounts_msg_directory: String get() = Tr.s(3484)
-  val android_hub_accounts_fail_code: String get() = Tr.s(3485)
-  val android_hub_accounts_fail_network: String get() = Tr.s(3486)
-  val android_hub_accounts_fail_storage: String get() = Tr.s(3487)
-  val android_hub_accounts_fail_cli: String get() = Tr.s(3488)
-  val android_hub_accounts_fail_dir: String get() = Tr.s(3489)
-  val android_hub_accounts_fail_verify: String get() = Tr.s(3490)
-  val android_hub_accounts_code_incomplete: String get() = Tr.s(3491)
-  val android_hub_accounts_code_other: String get() = Tr.s(3492)
-  val android_hub_accounts_msg_unverified: String get() = Tr.s(3493)
-  val android_hub_accounts_msg_registry: String get() = Tr.s(3494)
-  val android_hub_accounts_msg_identity: String get() = Tr.s(3495)
-  val android_hub_accounts_msg_subscription: String get() = Tr.s(3496)
-  fun android_hub_accounts_msg_refused(reason: Any): String = Tr.f(3497, arrayOf<Any>(reason))
-  val android_hub_accounts_msg_toolarge: String get() = Tr.s(3498)
-  val android_hub_accounts_msg_closed: String get() = Tr.s(3499)
-  val android_hub_accounts_msg_timeout: String get() = Tr.s(3500)
-  val android_hub_accounts_msg_notusage: String get() = Tr.s(3501)
-  val android_hub_accounts_usage_unauthorized: String get() = Tr.s(3502)
-  val android_hub_accounts_usage_forbidden: String get() = Tr.s(3503)
-  val android_hub_accounts_usage_limited: String get() = Tr.s(3504)
-  fun android_hub_accounts_usage_code(code: Any): String = Tr.f(3505, arrayOf<Any>(code))
-  val android_hub_accounts_err_gone: String get() = Tr.s(3506)
-  val android_hub_accounts_err_provider: String get() = Tr.s(3507)
-  val android_hub_accounts_err_add: String get() = Tr.s(3508)
-  val android_hub_accounts_err_gate: String get() = Tr.s(3509)
-  val android_hub_accounts_err_default: String get() = Tr.s(3510)
-  val android_hub_accounts_err_busy: String get() = Tr.s(3511)
-  val android_hub_accounts_err_select: String get() = Tr.s(3512)
-  val android_hub_accounts_err_check: String get() = Tr.s(3513)
-  fun android_hub_accounts_err_called(name: Any): String = Tr.f(3514, arrayOf<Any>(name))
-  val android_hub_update_off: String get() = Tr.s(3515)
-  val android_hub_update_checking: String get() = Tr.s(3516)
-  fun android_hub_update_downloading(version: Any): String = Tr.f(3517, arrayOf<Any>(version))
-  fun android_hub_update_waiting(version: Any): String = Tr.f(3518, arrayOf<Any>(version))
-  fun android_hub_update_installing(version: Any): String = Tr.f(3519, arrayOf<Any>(version))
-  val android_hub_update_failed: String get() = Tr.s(3520)
-  fun android_hub_update_row(version: Any): String = Tr.f(3521, arrayOf<Any>(version))
-  fun android_hub_update_done(version: Any): String = Tr.f(3522, arrayOf<Any>(version))
-  fun android_hub_update_rolledback(version: Any): String = Tr.f(3523, arrayOf<Any>(version))
-  fun android_hub_update_rolledback_why(version: Any, why: Any): String = Tr.f(3524, arrayOf<Any>(version, why))
-  fun android_hub_update_notstarted(version: Any): String = Tr.f(3525, arrayOf<Any>(version))
-  val android_hub_update_turns: String get() = Tr.s(3526)
-  fun android_hub_update_err_feed(code: Any): String = Tr.f(3527, arrayOf<Any>(code))
-  val android_hub_update_err_unpack: String get() = Tr.s(3528)
-  val android_hub_update_err_newer: String get() = Tr.s(3529)
-  val android_hub_update_err_nokey: String get() = Tr.s(3530)
-  val android_hub_update_err_untrusted: String get() = Tr.s(3531)
-  val android_hub_update_err_other: String get() = Tr.s(3532)
-  val android_hub_update_err_version: String get() = Tr.s(3533)
-  val android_hub_update_err_channel_tag: String get() = Tr.s(3534)
-  val android_hub_update_err_channel: String get() = Tr.s(3535)
-  val android_hub_update_err_file: String get() = Tr.s(3536)
-  val android_hub_update_err_checksum_bad: String get() = Tr.s(3537)
-  val android_hub_update_err_size_range: String get() = Tr.s(3538)
-  val android_hub_update_err_empty: String get() = Tr.s(3539)
-  val android_hub_update_err_listing: String get() = Tr.s(3540)
-  val android_hub_update_err_hardlink: String get() = Tr.s(3541)
-  val android_hub_update_err_link: String get() = Tr.s(3542)
-  fun android_hub_update_err_outside(name: Any): String = Tr.f(3543, arrayOf<Any>(name))
-  val android_hub_update_err_norun: String get() = Tr.s(3544)
-  val android_hub_update_err_nohub: String get() = Tr.s(3545)
-  val android_hub_update_err_size: String get() = Tr.s(3546)
-  val android_hub_update_err_checksum: String get() = Tr.s(3547)
-  val android_hub_update_err_guard: String get() = Tr.s(3548)
-  val android_hub_update_err_guard_busy: String get() = Tr.s(3549)
-  fun android_hub_work_todo(count: Any): String = Tr.f(3550, arrayOf<Any>(count))
-  fun android_hub_work_watch(title: Any): String = Tr.f(3551, arrayOf<Any>(title))
-  fun android_hub_work_lock(name: Any): String = Tr.f(3552, arrayOf<Any>(name))
-  val android_hub_work_release_done: String get() = Tr.s(3553)
-  val android_hub_work_flock: String get() = Tr.s(3554)
-  fun android_hub_work_position(n: Any, holder: Any): String = Tr.f(3555, arrayOf<Any>(n, holder))
-  fun android_hub_work_position_job(n: Any, title: Any): String = Tr.f(3556, arrayOf<Any>(n, title))
-  fun android_hub_work_job(title: Any): String = Tr.f(3557, arrayOf<Any>(title))
-  val android_hub_work_subagent: String get() = Tr.s(3558)
-  val android_hub_work_said: String get() = Tr.s(3559)
-  fun android_hub_work_steps(n: Number): String = Tr.f(3560, arrayOf<Any>(n))
-  fun android_hub_work_tokens(n: Any): String = Tr.f(3561, arrayOf<Any>(n))
-  fun android_hub_work_tokens_k(n: Any): String = Tr.f(3562, arrayOf<Any>(n))
-  fun android_hub_work_tokens_m(n: Any): String = Tr.f(3563, arrayOf<Any>(n))
-  fun android_hub_work_where(harness: Any, typed: String, type: Any, remote: String, host: Any, wt: String, branch: Any): String = Tr.f(3564, arrayOf<Any>(harness, typed, type, remote, host, wt, branch))
-  val android_hub_work_state_ended: String get() = Tr.s(3565)
-  val android_hub_work_word_launching: String get() = Tr.s(3566)
-  val android_hub_work_word_watching: String get() = Tr.s(3567)
-  val android_hub_work_word_timedout: String get() = Tr.s(3568)
-  val android_hub_work_word_cancelling: String get() = Tr.s(3569)
-  val android_hub_work_word_queued: String get() = Tr.s(3570)
-  val android_hub_work_word_unknown: String get() = Tr.s(3571)
-  val android_hub_work_word_completed: String get() = Tr.s(3572)
-  val android_hub_work_word_killed: String get() = Tr.s(3573)
-  fun android_hub_locks_outside(pid: Any): String = Tr.f(3574, arrayOf<Any>(pid))
-  val android_hub_picker_notinstalled: String get() = Tr.s(3575)
-  val android_hub_picker_notinstalled_here: String get() = Tr.s(3576)
-  val android_hub_picker_notinstalled_agy: String get() = Tr.s(3577)
-  val android_hub_picker_cli: String get() = Tr.s(3578)
-  fun android_hub_picker_left(left: Any): String = Tr.f(3579, arrayOf<Any>(left))
-  fun android_hub_picker_left_shared(left: Any): String = Tr.f(3580, arrayOf<Any>(left))
-  val android_hub_picker_shared: String get() = Tr.s(3581)
-  val android_hub_picker_why_expired: String get() = Tr.s(3582)
-  val android_hub_picker_why_unchecked: String get() = Tr.s(3583)
-  val android_hub_picker_why_connecting: String get() = Tr.s(3584)
-  val android_hub_picker_why_none: String get() = Tr.s(3585)
-  fun android_hub_picker_window_fivehour(left: Any): String = Tr.f(3586, arrayOf<Any>(left))
-  fun android_hub_picker_window_week(left: Any): String = Tr.f(3587, arrayOf<Any>(left))
-  fun android_hub_picker_window_opus(left: Any): String = Tr.f(3588, arrayOf<Any>(left))
-  fun android_hub_picker_window_sonnet(left: Any): String = Tr.f(3589, arrayOf<Any>(left))
-  fun android_hub_picker_window(label: Any, left: Any): String = Tr.f(3590, arrayOf<Any>(label, left))
-  fun android_hub_picker_resets(`when`: Any): String = Tr.f(3591, arrayOf<Any>(`when`))
-  fun android_hub_picker_extra(used: Any): String = Tr.f(3592, arrayOf<Any>(used))
-  fun android_hub_picker_extra_of(used: Any, limit: Any): String = Tr.f(3593, arrayOf<Any>(used, limit))
-  val android_hub_picker_nolimit: String get() = Tr.s(3594)
-  val android_hub_status_blocked: String get() = Tr.s(3595)
-  val android_hub_order_step_details: String get() = Tr.s(3596)
-  val android_hub_order_step_quote: String get() = Tr.s(3597)
-  val android_hub_order_step_pay: String get() = Tr.s(3598)
-  val android_hub_order_step_made: String get() = Tr.s(3599)
-  val android_hub_order_step_shipped: String get() = Tr.s(3600)
-  val android_hub_order_line_asked: String get() = Tr.s(3601)
-  val android_hub_order_line_getting: String get() = Tr.s(3602)
-  val android_hub_order_line_reply: String get() = Tr.s(3603)
-  val android_hub_order_line_files: String get() = Tr.s(3604)
-  val android_hub_order_line_quoting: String get() = Tr.s(3605)
-  val android_hub_order_line_expired: String get() = Tr.s(3606)
-  val android_hub_order_line_failed: String get() = Tr.s(3607)
-  val android_hub_order_line_pilot: String get() = Tr.s(3608)
-  val android_hub_order_line_refunded: String get() = Tr.s(3609)
-  val android_hub_order_line_quoted: String get() = Tr.s(3610)
-  val android_hub_order_line_fix: String get() = Tr.s(3611)
-  val android_hub_order_line_paid: String get() = Tr.s(3612)
-  val android_hub_order_line_placed: String get() = Tr.s(3613)
-  val android_hub_order_line_shipped: String get() = Tr.s(3614)
-  fun android_hub_order_line_tracking(tracking: Any): String = Tr.f(3615, arrayOf<Any>(tracking))
-  val android_hub_order_line_delivered: String get() = Tr.s(3616)
-  val android_hub_order_customs_ddp: String get() = Tr.s(3617)
-  val android_hub_order_customs: String get() = Tr.s(3618)
-  fun android_hub_order_buynow_total(total: Any): String = Tr.f(3619, arrayOf<Any>(total))
-  fun android_hub_buy_from(price: Any): String = Tr.f(3620, arrayOf<Any>(price))
-  fun android_hub_buy_last(price: Any): String = Tr.f(3621, arrayOf<Any>(price))
-  val android_hub_buy_incomplete: String get() = Tr.s(3622)
-  val android_hub_buy_again: String get() = Tr.s(3623)
-  val android_hub_buy_ready: String get() = Tr.s(3624)
-  val android_hub_buy_ready_board: String get() = Tr.s(3625)
-  fun android_hub_buy_ready_boards(n: Any): String = Tr.f(3626, arrayOf<Any>(n))
-  fun android_hub_buy_ready_parts(parts: Any): String = Tr.f(3627, arrayOf<Any>(parts))
-  fun android_hub_buy_check(note: Any): String = Tr.f(3628, arrayOf<Any>(note))
-  fun android_hub_buy_unavailable(error: Any): String = Tr.f(3629, arrayOf<Any>(error))
-  fun android_hub_buy_unavailable_parts(error: Any, parts: Any): String = Tr.f(3630, arrayOf<Any>(error, parts))
-  val android_hub_buy_ordered_paid: String get() = Tr.s(3631)
-  val android_hub_buy_ordered_placed: String get() = Tr.s(3632)
-  val android_hub_buy_ordered_shipped: String get() = Tr.s(3633)
-  val android_hub_buy_ordered_delivered: String get() = Tr.s(3634)
-  fun android_hub_buy_ordered(state: Any): String = Tr.f(3635, arrayOf<Any>(state))
-  fun android_hub_buy_noestimate(name: Any, path: Any): String = Tr.f(3636, arrayOf<Any>(name, path))
-  fun android_hub_buy_noestimate_why(name: Any, path: Any, why: Any): String = Tr.f(3637, arrayOf<Any>(name, path, why))
-  val android_hub_buy_unreachable: String get() = Tr.s(3638)
-  fun android_hub_buy_said(code: Any): String = Tr.f(3639, arrayOf<Any>(code))
-  val android_hub_ask_reject: String get() = Tr.s(3640)
-  val android_hub_ask_session: String get() = Tr.s(3641)
-  val android_hub_ask_decline: String get() = Tr.s(3642)
-  fun android_hub_ask_quote(detail: Any): String = Tr.f(3643, arrayOf<Any>(detail))
-  val android_hub_guard_safe: String get() = Tr.s(3644)
-  fun android_hub_guard_safe_why(why: Any): String = Tr.f(3645, arrayOf<Any>(why))
-  fun android_hub_guard_degraded(parts: Any): String = Tr.f(3646, arrayOf<Any>(parts))
-  val android_hub_guard_temp: String get() = Tr.s(3647)
-  val android_hub_guard_disk: String get() = Tr.s(3648)
-  fun android_hub_guard_rolledback(build: Any, to: Any): String = Tr.f(3649, arrayOf<Any>(build, to))
-  fun android_hub_guard_nostart(build: Any): String = Tr.f(3650, arrayOf<Any>(build))
-  fun android_hub_guard_nostart_skip(build: Any, skip: Any): String = Tr.f(3651, arrayOf<Any>(build, skip))
-  val android_hub_guard_down_retry: String get() = Tr.s(3652)
-  fun android_hub_guard_down(why: Any): String = Tr.f(3653, arrayOf<Any>(why))
-  fun android_hub_guard_restarting(why: Any): String = Tr.f(3654, arrayOf<Any>(why))
-  fun android_hub_guard_starting(build: Any): String = Tr.f(3655, arrayOf<Any>(build))
-  fun android_hub_guard_safe_on(build: Any, why: Any): String = Tr.f(3656, arrayOf<Any>(build, why))
-  fun android_hub_guard_safe_on_plain(build: Any): String = Tr.f(3657, arrayOf<Any>(build))
-  fun android_hub_guard_running(build: Any): String = Tr.f(3658, arrayOf<Any>(build))
-  val android_hub_guard_act_normal: String get() = Tr.s(3659)
-  val android_hub_guard_act_safe: String get() = Tr.s(3660)
-  val android_hub_guard_act_safe_note: String get() = Tr.s(3661)
-  fun android_hub_guard_act_rollback(build: Any): String = Tr.f(3662, arrayOf<Any>(build))
-  fun android_hub_guard_act_rollback_note(build: Any): String = Tr.f(3663, arrayOf<Any>(build))
-  val android_hub_guard_ans_noaction: String get() = Tr.s(3664)
-  fun android_hub_guard_ans_nobuild(build: Any): String = Tr.f(3665, arrayOf<Any>(build))
-  val android_hub_guard_ans_noback: String get() = Tr.s(3666)
-  val android_hub_guard_ans_stopping: String get() = Tr.s(3667)
-  val android_hub_guard_ans_restarting: String get() = Tr.s(3668)
-  val android_hub_guard_ans_safe: String get() = Tr.s(3669)
-  val android_hub_guard_ans_rollingback: String get() = Tr.s(3670)
-  val android_hub_guard_ans_switching: String get() = Tr.s(3671)
-  fun android_hub_guard_ans_bad(build: Any): String = Tr.f(3672, arrayOf<Any>(build))
-  val android_hub_guard_ans_updating: String get() = Tr.s(3673)
-  val android_hub_guard_ans_asked: String get() = Tr.s(3674)
-  val android_hub_guard_err_unreachable: String get() = Tr.s(3675)
-  val android_hub_guard_err_token: String get() = Tr.s(3676)
-  val android_hub_guard_err_disk: String get() = Tr.s(3677)
-  val android_hub_guard_err_here: String get() = Tr.s(3678)
-  val android_hub_guard_err_noanswer: String get() = Tr.s(3679)
-  val android_hub_guard_err_noguard: String get() = Tr.s(3680)
-  val android_hub_cmd_btw: String get() = Tr.s(3681)
-  val android_hub_cmd_give_desc: String get() = Tr.s(3682)
-  val android_hub_cmd_secret: String get() = Tr.s(3683)
-  val android_hub_cmd_intent: String get() = Tr.s(3684)
-  val android_hub_cmd_settle_desc: String get() = Tr.s(3685)
-  val android_hub_cmd_btw_empty: String get() = Tr.s(3686)
-  val android_hub_cmd_project: String get() = Tr.s(3687)
-  val android_hub_cmd_newproject: String get() = Tr.s(3688)
-  val android_hub_cmd_project_quote: String get() = Tr.s(3689)
-  val android_hub_cmd_project_existing: String get() = Tr.s(3690)
-  val android_hub_cmd_notcmd: String get() = Tr.s(3691)
-  val android_hub_link_screen: String get() = Tr.s(3692)
-  val android_hub_link_conversation: String get() = Tr.s(3693)
-  val android_hub_link_file: String get() = Tr.s(3694)
-  val android_hub_link_file_far: String get() = Tr.s(3695)
-  val android_hub_link_empty: String get() = Tr.s(3696)
-  val android_hub_link_unknown: String get() = Tr.s(3697)
-  val android_hub_link_project: String get() = Tr.s(3698)
-  val android_hub_link_project_far: String get() = Tr.s(3699)
-  val android_hub_link_thread: String get() = Tr.s(3700)
-  val android_hub_link_thread_far: String get() = Tr.s(3701)
-  val android_hub_link_noscreen: String get() = Tr.s(3702)
-  val android_hub_link_noproject: String get() = Tr.s(3703)
-  val android_hub_star_text: String get() = Tr.s(3704)
-  val android_hub_migrate_title: String get() = Tr.s(3705)
-  fun android_hub_migrate_body(step: String): String = Tr.f(3706, arrayOf<Any>(step))
-  fun android_hub_migrate_writing(p: Any, pt: Any, t: Any, tt: Any, e: Any, et: Any): String = Tr.f(3707, arrayOf<Any>(p, pt, t, tt, e, et))
-  fun android_hub_migrate_read(done: Any, total: Any): String = Tr.f(3708, arrayOf<Any>(done, total))
-  fun android_hub_migrate_copied(n: Any): String = Tr.f(3709, arrayOf<Any>(n))
-  fun android_hub_migrate_min(n: Any): String = Tr.f(3710, arrayOf<Any>(n))
-  fun android_hub_migrate_sec(n: Any): String = Tr.f(3711, arrayOf<Any>(n))
-  val android_hub_migrate_measuring: String get() = Tr.s(3712)
-  val android_hub_migrate_done: String get() = Tr.s(3713)
-  val android_hub_migrate_nothing: String get() = Tr.s(3714)
-  val android_hub_migrate_nothing_short: String get() = Tr.s(3715)
-  fun android_hub_migrate_took(n: Any): String = Tr.f(3716, arrayOf<Any>(n))
-  val android_hub_migrate_keys: String get() = Tr.s(3717)
-  val android_hub_migrate_failed: String get() = Tr.s(3718)
-  fun android_hub_migrate_failed_body(why: Any): String = Tr.f(3719, arrayOf<Any>(why))
-  fun android_hub_migrate_failed_body_from(why: Any, from: Any): String = Tr.f(3720, arrayOf<Any>(why, from))
-  fun android_hub_migrate_unreadable(error: Any): String = Tr.f(3721, arrayOf<Any>(error))
-  val android_hub_migrate_busy: String get() = Tr.s(3722)
-  fun android_hub_migrate_runs(n: Number): String = Tr.f(3723, arrayOf<Any>(n))
-  fun android_hub_migrate_routines(n: Number): String = Tr.f(3724, arrayOf<Any>(n))
-  val android_hub_migrate_machines: String get() = Tr.s(3725)
-  val android_hub_migrate_keystay: String get() = Tr.s(3726)
-  val android_hub_migrate_google: String get() = Tr.s(3727)
-  fun android_hub_migrate_clashes(n: Number): String = Tr.f(3728, arrayOf<Any>(n))
-  val android_hub_migrate_fresh: String get() = Tr.s(3729)
-  val android_hub_migrate_running: String get() = Tr.s(3730)
-  fun android_hub_migrate_botfolder(name: Any, gb: Any, path: Any): String = Tr.f(3731, arrayOf<Any>(name, gb, path))
-  fun android_hub_migrate_notcopied(path: Any, why: Any): String = Tr.f(3732, arrayOf<Any>(path, why))
-  fun android_hub_migrate_signin(names: Any): String = Tr.f(3733, arrayOf<Any>(names))
-  val android_hub_migrate_accounts: String get() = Tr.s(3734)
-  fun android_hub_migrate_vault(why: Any): String = Tr.f(3735, arrayOf<Any>(why))
-  val android_hub_history_title: String get() = Tr.s(3736)
-  val android_hub_history_closed: String get() = Tr.s(3737)
-  val android_away: String get() = Tr.s(3738)
-  val android_open: String get() = Tr.s(3739)
-  val android_search_messages: String get() = Tr.s(3740)
-  val android_find_inthread: String get() = Tr.s(3741)
-  val android_find_error: String get() = Tr.s(3742)
-  val android_find_prev: String get() = Tr.s(3743)
-  val android_find_next: String get() = Tr.s(3744)
-  val android_find_nomatch: String get() = Tr.s(3745)
-  fun android_find_count(n: Number, total: Number): String = Tr.f(3746, arrayOf<Any>(n, total))
-  val android_find_you: String get() = Tr.s(3747)
-  val android_find_agent: String get() = Tr.s(3748)
-  val android_sub_thread: String get() = Tr.s(3749)
-  fun android_sub_back(title: Any): String = Tr.f(3750, arrayOf<Any>(title))
-  val android_sub_gone: String get() = Tr.s(3751)
-  fun android_sub_more(n: Number): String = Tr.f(3752, arrayOf<Any>(n))
-  val android_sub_none: String get() = Tr.s(3753)
-  val android_sub_asked: String get() = Tr.s(3754)
-  val android_sub_tool: String get() = Tr.s(3755)
-  fun android_machine_on(name: Any): String = Tr.f(3756, arrayOf<Any>(name))
-  fun android_handoff_from(title: Any): String = Tr.f(3757, arrayOf<Any>(title))
-  fun android_handoff_note(note: Any): String = Tr.f(3758, arrayOf<Any>(note))
-  val android_queue_unsent: String get() = Tr.s(3759)
-  fun android_mark_runs(machine: Any): String = Tr.f(3760, arrayOf<Any>(machine))
-  fun android_mark_also(machines: Any): String = Tr.f(3761, arrayOf<Any>(machines))
-  fun android_mark_newon(machine: Any): String = Tr.f(3762, arrayOf<Any>(machine))
-  val android_google_signedin: String get() = Tr.s(3763)
-  val android_google_back: String get() = Tr.s(3764)
-  val android_improve_search: String get() = Tr.s(3765)
-  val android_improve_nomatch: String get() = Tr.s(3766)
-  val android_ring_head: String get() = Tr.s(3767)
-  val android_swarm_new: String get() = Tr.s(3768)
-  val android_swarm_topic: String get() = Tr.s(3769)
-  val android_swarm_goal: String get() = Tr.s(3770)
-  val android_swarm_seed: String get() = Tr.s(3771)
-  val android_swarm_member_add: String get() = Tr.s(3772)
-  fun android_swarm_member_n(n: Any): String = Tr.f(3773, arrayOf<Any>(n))
-  val android_swarm_role: String get() = Tr.s(3774)
-  fun android_swarm_members(n: Number): String = Tr.f(3775, arrayOf<Any>(n))
-  val android_swarm_pause: String get() = Tr.s(3776)
-  val android_swarm_resume: String get() = Tr.s(3777)
-  val android_swarm_stop: String get() = Tr.s(3778)
-  fun android_swarm_stop_ask(name: Any): String = Tr.f(3779, arrayOf<Any>(name))
-  val android_swarm_stop_yes: String get() = Tr.s(3780)
-  val android_swarm_keep: String get() = Tr.s(3781)
-  fun android_swarm_remove_member(name: Any): String = Tr.f(3782, arrayOf<Any>(name))
-  val android_swarm_state_active: String get() = Tr.s(3783)
-  val android_swarm_state_paused: String get() = Tr.s(3784)
-  val android_swarm_state_stopped: String get() = Tr.s(3785)
-  val android_swarm_state_done: String get() = Tr.s(3786)
-  val android_swarm_reason_circular: String get() = Tr.s(3787)
-  val android_swarm_reason_idle: String get() = Tr.s(3788)
-  val android_swarm_reason_budget: String get() = Tr.s(3789)
-  val android_swarm_reason_person: String get() = Tr.s(3790)
-  val android_swarm_reason_chatter: String get() = Tr.s(3791)
-  val android_swarm_tag_idea: String get() = Tr.s(3792)
-  val android_swarm_tag_critique: String get() = Tr.s(3793)
-  val android_swarm_tag_claim: String get() = Tr.s(3794)
-  val android_swarm_tag_done: String get() = Tr.s(3795)
-  val android_swarm_tag_question: String get() = Tr.s(3796)
-  val android_swarm_tag_synthesis: String get() = Tr.s(3797)
-  val android_swarm_waiting: String get() = Tr.s(3798)
-  fun android_swarm_held(why: Any): String = Tr.f(3799, arrayOf<Any>(why))
-  val android_swarm_post_hint: String get() = Tr.s(3800)
-  val android_swarm_none: String get() = Tr.s(3801)
-  val android_swarm_gone: String get() = Tr.s(3802)
-  val android_swarm_provider: String get() = Tr.s(3803)
-  val android_swarm_model: String get() = Tr.s(3804)
-  fun android_buy_ask(project: Any): String = Tr.f(3805, arrayOf<Any>(project))
-  val cat_cat: String get() = Tr.s(3806)
-  val cat_own: String get() = Tr.s(3807)
-  val cat_different: String get() = Tr.s(3808)
-  val cat_auto: String get() = Tr.s(3809)
-  val cat_color_bad: String get() = Tr.s(3810)
-  val android_copy_run: String get() = Tr.s(3811)
-  val android_copy_fullscreen: String get() = Tr.s(3812)
-  val android_term_chat_old: String get() = Tr.s(3813)
-  val android_browser_head: String get() = Tr.s(3814)
-  val android_clone_mode_folder: String get() = Tr.s(3815)
-  val android_clone_mode_git: String get() = Tr.s(3816)
-  val android_clone_repo_hint: String get() = Tr.s(3817)
-  val android_clone_private: String get() = Tr.s(3818)
-  val android_clone_signin: String get() = Tr.s(3819)
-  val android_clone_into: String get() = Tr.s(3820)
-  val android_clone_folder_change: String get() = Tr.s(3821)
-  val android_clone_folder_use: String get() = Tr.s(3822)
-  val android_clone_name_hint: String get() = Tr.s(3823)
-  val android_clone_thread: String get() = Tr.s(3824)
-  val android_clone_go: String get() = Tr.s(3825)
-  val android_clone_same: String get() = Tr.s(3826)
-  val android_clone_retry: String get() = Tr.s(3827)
-  val android_clone_loading: String get() = Tr.s(3828)
-  val android_clone_signin_code: String get() = Tr.s(3829)
-  val android_clone_signin_wait: String get() = Tr.s(3830)
-  val android_clone_signin_done: String get() = Tr.s(3831)
-  val android_clone_signin_failed: String get() = Tr.s(3832)
-  val android_clone_hint_nogh: String get() = Tr.s(3833)
-  val android_clone_hint_signedout: String get() = Tr.s(3834)
-  val android_clone_hint_error: String get() = Tr.s(3835)
-  val android_clone_phase_starting: String get() = Tr.s(3836)
-  val android_clone_phase_connecting: String get() = Tr.s(3837)
-  val android_clone_phase_counting: String get() = Tr.s(3838)
-  val android_clone_phase_compressing: String get() = Tr.s(3839)
-  val android_clone_phase_receiving: String get() = Tr.s(3840)
-  val android_clone_phase_resolving: String get() = Tr.s(3841)
-  val android_clone_phase_updating: String get() = Tr.s(3842)
-  val android_clone_phase_lfs: String get() = Tr.s(3843)
-  val android_clone_phase_adding: String get() = Tr.s(3844)
-  val android_clone_phase_cancelled: String get() = Tr.s(3845)
-  fun android_clone_busy(path: Any): String = Tr.f(3846, arrayOf<Any>(path))
-  fun android_clone_file(path: Any): String = Tr.f(3847, arrayOf<Any>(path))
-  val android_download_saved: String get() = Tr.s(3848)
-  fun android_download_of(have: Any, total: Any): String = Tr.f(3849, arrayOf<Any>(have, total))
-  val android_download_share: String get() = Tr.s(3850)
-  val android_download_retry: String get() = Tr.s(3851)
-  val android_download_noapp: String get() = Tr.s(3852)
-  val android_download_button: String get() = Tr.s(3853)
-  fun mobile_diff_summary(files: Any, added: Any, removed: Any): String = Tr.f(3854, arrayOf<Any>(files, added, removed))
-  fun mobile_diff_summary_one(added: Any, removed: Any): String = Tr.f(3855, arrayOf<Any>(added, removed))
-  val mobile_diff_new: String get() = Tr.s(3856)
-  val mobile_diff_deleted: String get() = Tr.s(3857)
-  val mobile_diff_renamed: String get() = Tr.s(3858)
-  val mobile_diff_binary: String get() = Tr.s(3859)
-  val mobile_settings_advanced: String get() = Tr.s(3860)
-  val android_connecting_word: String get() = Tr.s(3861)
-  fun ios_sections_running(n: Number): String = Tr.f(3862, arrayOf<Any>(n))
-  val ios_alerts_ask: String get() = Tr.s(3863)
-  val ios_alerts_allow: String get() = Tr.s(3864)
-  val ios_alerts_later: String get() = Tr.s(3865)
-  val ios_viewerbg: String get() = Tr.s(3866)
-  val ios_viewerbg_auto: String get() = Tr.s(3867)
-  val ios_viewerbg_custom: String get() = Tr.s(3868)
-  val ios_viewerbg_color: String get() = Tr.s(3869)
-  val ios_viewerbg_note: String get() = Tr.s(3870)
-  fun ios_hub_use(hub: Any): String = Tr.f(3871, arrayOf<Any>(hub))
-  val ios_thread_loading: String get() = Tr.s(3872)
-  val ios_hub_connecting: String get() = Tr.s(3873)
-  fun ios_project_remove_ask(title: Any): String = Tr.f(3874, arrayOf<Any>(title))
-  val ios_side_room: String get() = Tr.s(3875)
-  val ios_side_bot: String get() = Tr.s(3876)
-  val ios_side_uber: String get() = Tr.s(3877)
-  fun ios_project_terms(project: Any): String = Tr.f(3878, arrayOf<Any>(project))
-  fun ios_project_newthread(project: Any): String = Tr.f(3879, arrayOf<Any>(project))
-  fun ios_lock_waiting(n: Number): String = Tr.f(3880, arrayOf<Any>(n))
-  fun ios_conn_connecting(hub: Any): String = Tr.f(3881, arrayOf<Any>(hub))
-  val ios_conn_offline: String get() = Tr.s(3882)
-  fun ios_kids_hide(n: Number): String = Tr.f(3883, arrayOf<Any>(n))
-  fun ios_kids_show(n: Number): String = Tr.f(3884, arrayOf<Any>(n))
-  fun ios_model_label(model: Any): String = Tr.f(3885, arrayOf<Any>(model))
-  val ios_model_default: String get() = Tr.s(3886)
-  val ios_start: String get() = Tr.s(3887)
-  val ios_starting: String get() = Tr.s(3888)
-  val ios_room_missing: String get() = Tr.s(3889)
-  val ios_secret_new: String get() = Tr.s(3890)
-  fun ios_secret_named(name: Any): String = Tr.f(3891, arrayOf<Any>(name))
-  val ios_secret_refused: String get() = Tr.s(3892)
-  val ios_find_gone: String get() = Tr.s(3893)
-  val ios_thread: String get() = Tr.s(3894)
-  val ios_state_working: String get() = Tr.s(3895)
-  val ios_state_inactive: String get() = Tr.s(3896)
-  val ios_state_blocked: String get() = Tr.s(3897)
-  val ios_state_stalled: String get() = Tr.s(3898)
-  val ios_state_monitoring: String get() = Tr.s(3899)
-  val ios_state_finished: String get() = Tr.s(3900)
-  val ios_state_active: String get() = Tr.s(3901)
-  val ios_composer_hint: String get() = Tr.s(3902)
-  val ios_dictate_stop: String get() = Tr.s(3903)
-  val ios_dictate: String get() = Tr.s(3904)
-  val ios_attach_pictures: String get() = Tr.s(3905)
-  val ios_attach_pictures_no: String get() = Tr.s(3906)
-  val ios_draw_no: String get() = Tr.s(3907)
-  val ios_attach_no: String get() = Tr.s(3908)
-  val ios_command_failed: String get() = Tr.s(3909)
-  fun ios_work_head(word: Any): String = Tr.f(3910, arrayOf<Any>(word))
-  val ios_fold_open: String get() = Tr.s(3911)
-  val ios_fold_shut: String get() = Tr.s(3912)
-  val ios_step_design: String get() = Tr.s(3913)
-  val ios_ask_asks: String get() = Tr.s(3914)
-  val ios_ask_asked: String get() = Tr.s(3915)
-  fun ios_ask_answered(answer: Any): String = Tr.f(3916, arrayOf<Any>(answer))
-  val ios_improve_sent: String get() = Tr.s(3917)
-  val ios_on: String get() = Tr.s(3918)
-  val ios_off: String get() = Tr.s(3919)
-  val ios_system: String get() = Tr.s(3920)
-  val ios_light: String get() = Tr.s(3921)
-  val ios_dark: String get() = Tr.s(3922)
-  val ios_conn_online: String get() = Tr.s(3923)
-  val ios_conn_connectingword: String get() = Tr.s(3924)
-  val ios_conn_offlineword: String get() = Tr.s(3925)
-  fun ios_version(version: Any, build: Any): String = Tr.f(3926, arrayOf<Any>(version, build))
-  fun ios_hub_forget_ask(hub: Any): String = Tr.f(3927, arrayOf<Any>(hub))
-  val ios_hub_this: String get() = Tr.s(3928)
-  val ios_update_stable: String get() = Tr.s(3929)
-  val ios_update_beta: String get() = Tr.s(3930)
-  val ios_order: String get() = Tr.s(3931)
-  fun ios_order_named(name: Any): String = Tr.f(3932, arrayOf<Any>(name))
-  val ios_invite_machine: String get() = Tr.s(3933)
-  val ios_invite_device: String get() = Tr.s(3934)
-  fun ios_link_used(`when`: Any, who: Any, mark: String): String = Tr.f(3935, arrayOf<Any>(`when`, who, mark))
-  val ios_link_amachine: String get() = Tr.s(3936)
-  val ios_link_adevice: String get() = Tr.s(3937)
-  val ios_link_revoked_never: String get() = Tr.s(3938)
-  fun ios_link_revoked_with(who: Any): String = Tr.f(3939, arrayOf<Any>(who))
-  val ios_link_machine_linked: String get() = Tr.s(3940)
-  val ios_link_device_paired: String get() = Tr.s(3941)
-  val ios_link_expired: String get() = Tr.s(3942)
-  fun ios_link_open(time: Any): String = Tr.f(3943, arrayOf<Any>(time))
-  fun ios_hub_address(address: Any): String = Tr.f(3944, arrayOf<Any>(address))
-  val ios_share: String get() = Tr.s(3945)
-  fun ios_link_revoke_used(kind: String, name: Any): String = Tr.f(3946, arrayOf<Any>(kind, name))
-  val ios_unnamed: String get() = Tr.s(3947)
-  val ios_link_revoke_open: String get() = Tr.s(3948)
-  val ios_devices_loadfail: String get() = Tr.s(3949)
-  val ios_invite_creating: String get() = Tr.s(3950)
-  val ios_invite_fail: String get() = Tr.s(3951)
-  val ios_invite_ready: String get() = Tr.s(3952)
-  val ios_invite_fail_conn: String get() = Tr.s(3953)
-  val ios_revoke_device_fail: String get() = Tr.s(3954)
-  val ios_revoke_link_fail: String get() = Tr.s(3955)
-  val ios_pair_repair: String get() = Tr.s(3956)
-  val ios_pair_connect_title: String get() = Tr.s(3957)
-  val ios_pair_paste: String get() = Tr.s(3958)
-  val ios_pair_paste_hint: String get() = Tr.s(3959)
-  val ios_pair_invalid: String get() = Tr.s(3960)
-  fun ios_thread_delete_ask(title: Any): String = Tr.f(3961, arrayOf<Any>(title))
-  fun ios_search_none(query: Any): String = Tr.f(3962, arrayOf<Any>(query))
-  val ios_you: String get() = Tr.s(3963)
-  val ios_agent: String get() = Tr.s(3964)
-  fun ios_room_post_to(room: Any): String = Tr.f(3965, arrayOf<Any>(room))
-  fun ios_find_none(query: Any): String = Tr.f(3966, arrayOf<Any>(query))
-  val ios_ago_now: String get() = Tr.s(3967)
-  fun ios_ago_m(n: Any): String = Tr.f(3968, arrayOf<Any>(n))
-  fun ios_ago_h(n: Any): String = Tr.f(3969, arrayOf<Any>(n))
-  fun ios_ago_d(n: Any): String = Tr.f(3970, arrayOf<Any>(n))
-  val ios_mic_off: String get() = Tr.s(3971)
-  val ios_mic_failed: String get() = Tr.s(3972)
-  val ios_link_update: String get() = Tr.s(3973)
-  val ios_link_nothere: String get() = Tr.s(3974)
-  val ios_hub_notconnected: String get() = Tr.s(3975)
-  fun ios_preview_none(size: Any): String = Tr.f(3976, arrayOf<Any>(size))
-  val ios_review_resolved: String get() = Tr.s(3977)
-  val ios_review_reopen: String get() = Tr.s(3978)
-  val ios_review_resolve: String get() = Tr.s(3979)
-  fun ios_settled_count(n: Any): String = Tr.f(3980, arrayOf<Any>(n))
-  fun ios_history_count(n: Any): String = Tr.f(3981, arrayOf<Any>(n))
-  fun ios_pad_colour(n: Any): String = Tr.f(3982, arrayOf<Any>(n))
-  val ios_pad_pen: String get() = Tr.s(3983)
-  val ios_pad_box: String get() = Tr.s(3984)
-  val ios_pad_eraser: String get() = Tr.s(3985)
-  val ios_hub_restart: String get() = Tr.s(3986)
-  val ios_hub_refused_pairing: String get() = Tr.s(3987)
-  val ios_hub_asking: String get() = Tr.s(3988)
-  val ios_hub_restart_none: String get() = Tr.s(3989)
-  val ios_hub_status_fail: String get() = Tr.s(3990)
-  val ios_hub_sent: String get() = Tr.s(3991)
-  val ios_hub_refused: String get() = Tr.s(3992)
-  val ios_hub_cannot: String get() = Tr.s(3993)
-  val ios_hub_machine_unreachable: String get() = Tr.s(3994)
-  val ios_hub_noanswer: String get() = Tr.s(3995)
-  fun ios_hub_still(status: Any): String = Tr.f(3996, arrayOf<Any>(status))
-  val ios_hub_waiting: String get() = Tr.s(3997)
-  fun ios_hub_is(status: Any): String = Tr.f(3998, arrayOf<Any>(status))
-  val ios_hub_down: String get() = Tr.s(3999)
-  val ios_hub_up_safe_degraded: String get() = Tr.s(4000)
-  val ios_hub_up_degraded: String get() = Tr.s(4001)
-  val ios_hub_up_safe: String get() = Tr.s(4002)
-  val ios_hub_up: String get() = Tr.s(4003)
-  val ios_star: String get() = Tr.s(4004)
-  val ios_pad_length_example: String get() = Tr.s(4005)
-  val ios_pair_code_field: String get() = Tr.s(4006)
-  val ios_accounts: String get() = Tr.s(4007)
-  val ios_devices_add: String get() = Tr.s(4008)
-  val ios_hub_add: String get() = Tr.s(4009)
-  val ios_accounts_addsignin: String get() = Tr.s(4010)
-  val ios_devices_intro: String get() = Tr.s(4011)
-  val ios_project_add_first: String get() = Tr.s(4012)
-  val ios_settings_alerts: String get() = Tr.s(4013)
-  val ios_settings_sound: String get() = Tr.s(4014)
-  val ios_pair_ask_note: String get() = Tr.s(4015)
-  val ios_projects_none_note: String get() = Tr.s(4016)
-  val ios_review_comment_field: String get() = Tr.s(4017)
-  val ios_project_badge: String get() = Tr.s(4018)
-  val ios_order_buy: String get() = Tr.s(4019)
-  val ios_diff_head: String get() = Tr.s(4020)
-  val ios_photo_choose: String get() = Tr.s(4021)
-  val ios_close_lower: String get() = Tr.s(4022)
-  val ios_compare_close: String get() = Tr.s(4023)
-  val ios_badge_colour: String get() = Tr.s(4024)
-  val ios_pair_code_connect: String get() = Tr.s(4025)
-  val ios_history: String get() = Tr.s(4026)
-  val ios_copied: String get() = Tr.s(4027)
-  val ios_copy_code: String get() = Tr.s(4028)
-  val ios_copy_run: String get() = Tr.s(4029)
-  val ios_term_fullscreen: String get() = Tr.s(4030)
-  val ios_delete_dots: String get() = Tr.s(4031)
-  val ios_devices: String get() = Tr.s(4032)
-  val ios_pad_hint_eraser: String get() = Tr.s(4033)
-  val ios_pad_hint_pen: String get() = Tr.s(4034)
-  val ios_pad_hint_box: String get() = Tr.s(4035)
-  val ios_pad_paper: String get() = Tr.s(4036)
-  val ios_pair_invite_incomplete: String get() = Tr.s(4037)
-  val ios_pair_enter: String get() = Tr.s(4038)
-  val ios_pair_code_needhub: String get() = Tr.s(4039)
-  val ios_devices_none: String get() = Tr.s(4040)
-  val ios_invite_expired: String get() = Tr.s(4041)
-  val ios_invite_expires: String get() = Tr.s(4042)
-  val ios_project_folder: String get() = Tr.s(4043)
-  val ios_quiet_from: String get() = Tr.s(4044)
-  val ios_term_gone: String get() = Tr.s(4045)
-  val ios_hub: String get() = Tr.s(4046)
-  val ios_hub_address_field: String get() = Tr.s(4047)
-  val ios_badge_icon: String get() = Tr.s(4048)
-  val ios_improvements: String get() = Tr.s(4049)
-  val ios_quiet_note: String get() = Tr.s(4050)
-  val ios_term_end: String get() = Tr.s(4051)
-  val ios_browser_keys: String get() = Tr.s(4052)
-  val ios_devices_lastseen: String get() = Tr.s(4053)
-  val ios_pad_length_ask: String get() = Tr.s(4054)
-  val ios_licences: String get() = Tr.s(4055)
-  val ios_links_none: String get() = Tr.s(4056)
-  val ios_thread_older: String get() = Tr.s(4057)
-  val ios_mech_loading: String get() = Tr.s(4058)
-  val ios_thread_detach: String get() = Tr.s(4059)
-  val ios_accounts_name: String get() = Tr.s(4060)
-  val ios_term_newshell: String get() = Tr.s(4061)
-  val ios_accounts_none: String get() = Tr.s(4062)
-  val ios_browser_none: String get() = Tr.s(4063)
-  val ios_diff_none: String get() = Tr.s(4064)
-  val ios_review_comments_none: String get() = Tr.s(4065)
-  val ios_mech_none: String get() = Tr.s(4066)
-  val ios_projects_none: String get() = Tr.s(4067)
-  val ios_notconnected: String get() = Tr.s(4068)
-  val ios_term_none: String get() = Tr.s(4069)
-  val ios_threads_none: String get() = Tr.s(4070)
-  val ios_secret_notneeded: String get() = Tr.s(4071)
-  val ios_notpaired: String get() = Tr.s(4072)
-  val ios_send_failed: String get() = Tr.s(4073)
-  val ios_compare_none: String get() = Tr.s(4074)
-  val ios_settings_alerts_note: String get() = Tr.s(4075)
-  val ios_pair_howto: String get() = Tr.s(4076)
-  val ios_improve_github: String get() = Tr.s(4077)
-  val ios_signin_open: String get() = Tr.s(4078)
-  val ios_devices_paired: String get() = Tr.s(4079)
-  val ios_links: String get() = Tr.s(4080)
-  val ios_pair_ask: String get() = Tr.s(4081)
-  val ios_paste: String get() = Tr.s(4082)
-  val ios_signin_code_field: String get() = Tr.s(4083)
-  val ios_secret_value: String get() = Tr.s(4084)
-  val ios_viewer_picked: String get() = Tr.s(4085)
-  val ios_room_post: String get() = Tr.s(4086)
-  val ios_quiet: String get() = Tr.s(4087)
-  val ios_reconnect: String get() = Tr.s(4088)
-  val ios_picture_remove: String get() = Tr.s(4089)
-  val ios_project_rename: String get() = Tr.s(4090)
-  val ios_revoke_ask: String get() = Tr.s(4091)
-  val ios_revoke_link_ask: String get() = Tr.s(4092)
-  val ios_review_run: String get() = Tr.s(4093)
-  val ios_find: String get() = Tr.s(4094)
-  val ios_search_field: String get() = Tr.s(4095)
-  val ios_signin_send: String get() = Tr.s(4096)
-  val ios_improve_send: String get() = Tr.s(4097)
-  val ios_term_shell: String get() = Tr.s(4098)
-  val ios_thread_empty: String get() = Tr.s(4099)
-  val ios_improve_send_note: String get() = Tr.s(4100)
-  val ios_state: String get() = Tr.s(4101)
-  val ios_photo_take: String get() = Tr.s(4102)
-  val ios_terminals: String get() = Tr.s(4103)
-  val ios_term_screen: String get() = Tr.s(4104)
-  val ios_voice_spelling: String get() = Tr.s(4105)
-  val ios_revoke_note: String get() = Tr.s(4106)
-  val ios_file_unread: String get() = Tr.s(4107)
-  val ios_hub_proto: String get() = Tr.s(4108)
-  val ios_hub_forget_note: String get() = Tr.s(4109)
-  val ios_diff_nogit: String get() = Tr.s(4110)
-  val ios_thread_actions: String get() = Tr.s(4111)
-  val ios_quiet_to: String get() = Tr.s(4112)
-  val ios_pair_code_type: String get() = Tr.s(4113)
-  val ios_pad_undo: String get() = Tr.s(4114)
-  val ios_updates: String get() = Tr.s(4115)
-  val ios_quiet_urgent: String get() = Tr.s(4116)
-  val ios_use: String get() = Tr.s(4117)
-  val ios_pair_fresh: String get() = Tr.s(4118)
-  val ios_newthread_hint: String get() = Tr.s(4119)
-  val ios_improve_ask: String get() = Tr.s(4120)
-  val ios_find_field: String get() = Tr.s(4121)
-  val ios_browser_driving: String get() = Tr.s(4122)
-  val ios_ask_answer: String get() = Tr.s(4123)
-  val ios_pair_wrongcode: String get() = Tr.s(4124)
-  val ios_pair_expired: String get() = Tr.s(4125)
-  val ios_pair_used: String get() = Tr.s(4126)
-  val ios_pair_revoked: String get() = Tr.s(4127)
-  val ios_pair_ratelimited: String get() = Tr.s(4128)
-  val ios_pair_storage: String get() = Tr.s(4129)
-  val ios_pair_required: String get() = Tr.s(4130)
-  val ios_pair_unreachable: String get() = Tr.s(4131)
-  val ios_connecting: String get() = Tr.s(4132)
-  val ios_offline: String get() = Tr.s(4133)
-  val ios_hub_refused_plain: String get() = Tr.s(4134)
-  val ios_thinking: String get() = Tr.s(4135)
-  val ios_tab_board: String get() = Tr.s(4136)
-  val ios_tab_schematic: String get() = Tr.s(4137)
-  val ios_tab_split: String get() = Tr.s(4138)
-  val ios_tab_mech: String get() = Tr.s(4139)
-  val ios_tab_files: String get() = Tr.s(4140)
-  val ios_tab_diff: String get() = Tr.s(4141)
-  val ios_tab_review: String get() = Tr.s(4142)
-  val ios_tab_browser: String get() = Tr.s(4143)
-  val ios_review_checks: String get() = Tr.s(4144)
-  val ios_review_bom: String get() = Tr.s(4145)
-  val ios_review_comments: String get() = Tr.s(4146)
-  val ios_board_none: String get() = Tr.s(4147)
-  val ios_schematic_none: String get() = Tr.s(4148)
-  fun ios_term_exited(code: Any): String = Tr.f(4149, arrayOf<Any>(code))
-  val ios_term_failed: String get() = Tr.s(4150)
-  fun ios_island_more(n: Number): String = Tr.f(4151, arrayOf<Any>(n))
-  val ios_island_stale: String get() = Tr.s(4152)
-  fun ios_plot_previous(why: Any): String = Tr.f(4153, arrayOf<Any>(why))
-  val ios_plot_decoding: String get() = Tr.s(4154)
-  val ios_plot_undecodable: String get() = Tr.s(4155)
-  val ios_plot_badref: String get() = Tr.s(4156)
-  val ios_plot_badmodel: String get() = Tr.s(4157)
-  val ios_plot_incomplete: String get() = Tr.s(4158)
-  val ios_plot_unexpected: String get() = Tr.s(4159)
-  val ios_part_bad: String get() = Tr.s(4160)
-  val ios_part_placement: String get() = Tr.s(4161)
-  val ios_part_triangles: String get() = Tr.s(4162)
-  val ios_part_incomplete: String get() = Tr.s(4163)
-  val ios_part_unexpected: String get() = Tr.s(4164)
-  fun ios_parts_progress(done: Number, of: Number): String = Tr.f(4165, arrayOf<Any>(done, of))
-  val ios_hub_timeout: String get() = Tr.s(4166)
-  val ios_pair_local: String get() = Tr.s(4167)
-  val ios_search_messages: String get() = Tr.s(4168)
-  fun ios_sub_of(thread: Any): String = Tr.f(4169, arrayOf<Any>(thread))
-  val ios_sub_thread: String get() = Tr.s(4170)
-  val ios_sub_gone: String get() = Tr.s(4171)
-  fun ios_sub_more(n: Number): String = Tr.f(4172, arrayOf<Any>(n))
-  val ios_sub_none: String get() = Tr.s(4173)
-  val ios_sub_title: String get() = Tr.s(4174)
-  val ios_sub_tool: String get() = Tr.s(4175)
-  val ios_sub_reported: String get() = Tr.s(4176)
-  val ios_sub_ended: String get() = Tr.s(4177)
-  val ios_state_completed: String get() = Tr.s(4178)
-  val ios_handoff_open: String get() = Tr.s(4179)
-  fun ios_handoff_from(title: Any): String = Tr.f(4180, arrayOf<Any>(title))
-  fun ios_handoff_note(note: Any): String = Tr.f(4181, arrayOf<Any>(note))
-  fun ios_machine_away(label: Any): String = Tr.f(4182, arrayOf<Any>(label))
-  fun ios_machine_on(machine: Any): String = Tr.f(4183, arrayOf<Any>(machine))
-  fun ios_machine_runs(machine: Any): String = Tr.f(4184, arrayOf<Any>(machine))
-  val ios_machine_every: String get() = Tr.s(4185)
-  val ios_thread_marked: String get() = Tr.s(4186)
-  val ios_find_bar: String get() = Tr.s(4187)
-  val ios_find_prev: String get() = Tr.s(4188)
-  val ios_find_next: String get() = Tr.s(4189)
-  val ios_find_close: String get() = Tr.s(4190)
-  fun ios_find_count(at: Number, total: Number): String = Tr.f(4191, arrayOf<Any>(at, total))
-  fun ios_find_countmore(at: Number, total: Number): String = Tr.f(4192, arrayOf<Any>(at, total))
-  val ios_queue_unsent: String get() = Tr.s(4193)
-  val ios_queue_refused: String get() = Tr.s(4194)
-  val ios_queue_sending: String get() = Tr.s(4195)
-  fun ios_newon(machine: Any): String = Tr.f(4196, arrayOf<Any>(machine))
-  fun ios_newon_away(machine: Any): String = Tr.f(4197, arrayOf<Any>(machine))
-  fun ios_machine_also(machines: Any): String = Tr.f(4198, arrayOf<Any>(machines))
-  val ios_voice_mic_note: String get() = Tr.s(4199)
-  fun ios_voice_mic_note_device(device: Any): String = Tr.f(4200, arrayOf<Any>(device))
-  val ios_voice_dict_empty: String get() = Tr.s(4201)
-  val ios_voice_learned_empty: String get() = Tr.s(4202)
-  val ios_voice_pebble: String get() = Tr.s(4203)
-  val ios_voice_pebble_note: String get() = Tr.s(4204)
-  val ios_devices_add_note: String get() = Tr.s(4205)
-  val ios_buy: String get() = Tr.s(4206)
-  fun ios_buy_from(price: Any): String = Tr.f(4207, arrayOf<Any>(price))
-  fun ios_buy_last(price: Any): String = Tr.f(4208, arrayOf<Any>(price))
-  val ios_buy_incomplete: String get() = Tr.s(4209)
-  val ios_improve_search: String get() = Tr.s(4210)
-  val android_notify_head: String get() = Tr.s(4211)
-  val gpui_keysheet_note: String get() = Tr.s(4212)
-  val gpui_keys_help: String get() = Tr.s(4213)
-  val gpui_f2_welcome_body: String get() = Tr.s(4214)
-  fun gpui_f2_data_folder_note(home: Any): String = Tr.f(4215, arrayOf<Any>(home))
-  val gpui_f2_choose_another: String get() = Tr.s(4216)
-  val gpui_f2_usage_note: String get() = Tr.s(4217)
-  val gpui_f2_v014: String get() = Tr.s(4218)
-  val gpui_f2_v014_copied: String get() = Tr.s(4219)
-  fun gpui_f2_v014_found(from: Any): String = Tr.f(4220, arrayOf<Any>(from))
-  val gpui_f2_agents_body: String get() = Tr.s(4221)
-  fun gpui_f2_installing(note: Any): String = Tr.f(4222, arrayOf<Any>(note))
-  fun gpui_f2_install_failed(note: Any): String = Tr.f(4223, arrayOf<Any>(note))
-  val gpui_f2_installed: String get() = Tr.s(4224)
-  fun gpui_f2_version(v: Any): String = Tr.f(4225, arrayOf<Any>(v))
-  fun gpui_f2_v_connected(v: Any): String = Tr.f(4226, arrayOf<Any>(v))
-  fun gpui_f2_v_connected_as(v: Any, who: Any): String = Tr.f(4227, arrayOf<Any>(v, who))
-  val gpui_f2_i_connected: String get() = Tr.s(4228)
-  fun gpui_f2_i_connected_as(who: Any): String = Tr.f(4229, arrayOf<Any>(who))
-  fun gpui_f2_v_notconnected(v: Any): String = Tr.f(4230, arrayOf<Any>(v))
-  val gpui_f2_i_notconnected: String get() = Tr.s(4231)
-  fun gpui_f2_v_runcmd(v: Any, cmd: Any): String = Tr.f(4232, arrayOf<Any>(v, cmd))
-  fun gpui_f2_i_runcmd(cmd: Any): String = Tr.f(4233, arrayOf<Any>(cmd))
-  val gpui_f2_more_agents: String get() = Tr.s(4234)
-  val gpui_f2_check_after: String get() = Tr.s(4235)
-  val gpui_f2_tools: String get() = Tr.s(4236)
-  val gpui_f2_tools_body: String get() = Tr.s(4237)
-  fun gpui_f2_kicad_ok(v: Any, path: Any): String = Tr.f(4238, arrayOf<Any>(v, path))
-  fun gpui_f2_kicad_installing(v: Any, note: Any): String = Tr.f(4239, arrayOf<Any>(v, note))
-  fun gpui_f2_kicad_auto(v: Any): String = Tr.f(4240, arrayOf<Any>(v))
-  val gpui_f2_kicad_nopkg: String get() = Tr.s(4241)
-  val gpui_f2_freecad_notfound: String get() = Tr.s(4242)
-  val gpui_f2_locate_kicad: String get() = Tr.s(4243)
-  val gpui_f2_locate_freecad: String get() = Tr.s(4244)
-  fun gpui_f2_locate_note(tool: Any): String = Tr.f(4245, arrayOf<Any>(tool))
-  fun gpui_f2_path_to(tool: Any): String = Tr.f(4246, arrayOf<Any>(tool))
-  val gpui_f2_alwayson: String get() = Tr.s(4247)
-  val gpui_f2_alwayson_body: String get() = Tr.s(4248)
-  val gpui_f2_aon_here: String get() = Tr.s(4249)
-  val gpui_f2_aon_here_note: String get() = Tr.s(4250)
-  val gpui_f2_aon_boat: String get() = Tr.s(4251)
-  val gpui_f2_aon_boat_note: String get() = Tr.s(4252)
-  val gpui_f2_aon_machine: String get() = Tr.s(4253)
-  val gpui_f2_aon_machine_note: String get() = Tr.s(4254)
-  val gpui_f2_chosen: String get() = Tr.s(4255)
-  val gpui_f2_choose: String get() = Tr.s(4256)
-  val gpui_f2_coming: String get() = Tr.s(4257)
-  val gpui_f2_coming_note: String get() = Tr.s(4258)
-  val gpui_f2_project_body: String get() = Tr.s(4259)
-  val gpui_f2_first_message_note: String get() = Tr.s(4260)
-  val gpui_f2_what_agent: String get() = Tr.s(4261)
-  val gpui_f2_folder_note: String get() = Tr.s(4262)
-  val gpui_f2_pair_phone: String get() = Tr.s(4263)
-  val gpui_f2_pair_phone_note: String get() = Tr.s(4264)
-  val gpui_f2_pair_phone_shown: String get() = Tr.s(4265)
-  val gpui_f2_show_code: String get() = Tr.s(4266)
-  val gpui_f2_done_body: String get() = Tr.s(4267)
-  val gpui_f2_open_uber: String get() = Tr.s(4268)
-  val gpui_f2_setup_phone: String get() = Tr.s(4269)
-  val gpui_f2_setup_five: String get() = Tr.s(4270)
-  fun gpui_swarm_row(n: Number, w: Number): String = Tr.f(4271, arrayOf<Any>(n, w))
-  fun gpui_swarm_held(why: Any): String = Tr.f(4272, arrayOf<Any>(why))
-  fun gpui_swarm_state_why(state: Any, why: Any): String = Tr.f(4273, arrayOf<Any>(state, why))
-  val gpui_swarm_new: String get() = Tr.s(4274)
-  val gpui_swarm_add_member: String get() = Tr.s(4275)
-  val gpui_swarm_start: String get() = Tr.s(4276)
-  val gpui_swarm_topic: String get() = Tr.s(4277)
-  val gpui_swarm_goal: String get() = Tr.s(4278)
-  val gpui_swarm_seed: String get() = Tr.s(4279)
-  val gpui_swarm_role: String get() = Tr.s(4280)
-  val gpui_swarm_remove: String get() = Tr.s(4281)
-  val gpui_swarm_over: String get() = Tr.s(4282)
-  val gpui_swarm_none: String get() = Tr.s(4283)
-  val ios_swarm_new: String get() = Tr.s(4284)
-  fun ios_swarm_new_in(project: Any): String = Tr.f(4285, arrayOf<Any>(project))
-  fun ios_swarm_members(n: Number): String = Tr.f(4286, arrayOf<Any>(n))
-  val ios_swarm_state_paused: String get() = Tr.s(4287)
-  val ios_swarm_state_removed: String get() = Tr.s(4288)
-  val ios_swarm_tag_idea: String get() = Tr.s(4289)
-  val ios_swarm_tag_critique: String get() = Tr.s(4290)
-  val ios_swarm_tag_claim: String get() = Tr.s(4291)
-  val ios_swarm_tag_synthesis: String get() = Tr.s(4292)
-  val ios_swarm_reason_circular: String get() = Tr.s(4293)
-  val ios_swarm_reason_budget: String get() = Tr.s(4294)
-  val ios_swarm_reason_person: String get() = Tr.s(4295)
-  val ios_swarm_reason_chatter: String get() = Tr.s(4296)
-  fun ios_swarm_held(why: Any): String = Tr.f(4297, arrayOf<Any>(why))
-  val ios_swarm_topic: String get() = Tr.s(4298)
-  val ios_swarm_goal: String get() = Tr.s(4299)
-  val ios_swarm_seed: String get() = Tr.s(4300)
-  val ios_swarm_role: String get() = Tr.s(4301)
-  val ios_swarm_add: String get() = Tr.s(4302)
-  fun ios_swarm_remove_ask(name: Any): String = Tr.f(4303, arrayOf<Any>(name))
-  val ios_swarm_stop_ask: String get() = Tr.s(4304)
-  val ios_swarm_post: String get() = Tr.s(4305)
-  val ios_image_save: String get() = Tr.s(4306)
-  val ios_image_saved: String get() = Tr.s(4307)
-  val ios_image_denied: String get() = Tr.s(4308)
-  val ios_image_failed: String get() = Tr.s(4309)
-  val ios_image_incoming: String get() = Tr.s(4310)
-  val ios_image_loadfail: String get() = Tr.s(4311)
-  val ios_image_unavailable: String get() = Tr.s(4312)
-  val native_permission_photos_add: String get() = Tr.s(4313)
-  fun ios_buy_ask(project: Any): String = Tr.f(4314, arrayOf<Any>(project))
-  val ios_settings_accounts_usage: String get() = Tr.s(4315)
-  val ios_settings_machines_devices: String get() = Tr.s(4316)
-  val ios_settings_alerts_on: String get() = Tr.s(4317)
-  val ios_settings_alerts_off: String get() = Tr.s(4318)
-  fun ios_settings_accounts_n(n: Number): String = Tr.f(4319, arrayOf<Any>(n))
-  val hub_acct_this_hubs_sign_in: String get() = Tr.s(4320)
-  val hub_acct_no_usage_reading_yet: String get() = Tr.s(4321)
-  val hub_acct_this_hubs_claude_sign_in: String get() = Tr.s(4322)
-  val hub_acct_this_hubs_codex_sign_in: String get() = Tr.s(4323)
-  val hub_acct_claude_cli_login: String get() = Tr.s(4324)
-  val hub_acct_codex_cli_login: String get() = Tr.s(4325)
-  val hub_acct_fable_weekly: String get() = Tr.s(4326)
-  fun ios_acct_also(names: Any): String = Tr.f(4327, arrayOf<Any>(names))
-  val ios_clone_mode: String get() = Tr.s(4328)
-  val ios_clone_repo_hint: String get() = Tr.s(4329)
-  val ios_clone_signin: String get() = Tr.s(4330)
-  val ios_clone_change: String get() = Tr.s(4331)
-  val ios_clone_name: String get() = Tr.s(4332)
-  val ios_clone_thread: String get() = Tr.s(4333)
-  val ios_clone_go: String get() = Tr.s(4334)
-  fun ios_clone_into(dest: Any): String = Tr.f(4335, arrayOf<Any>(dest))
-  val ios_clone_same: String get() = Tr.s(4336)
-  fun ios_clone_title(repo: Any): String = Tr.f(4337, arrayOf<Any>(repo))
-  fun ios_clone_cloned(repo: Any): String = Tr.f(4338, arrayOf<Any>(repo))
-  val ios_clone_cancelled: String get() = Tr.s(4339)
-  fun ios_clone_code(url: Any): String = Tr.f(4340, arrayOf<Any>(url))
-  val ios_clone_signin_starting: String get() = Tr.s(4341)
-  val ios_clone_signin_done: String get() = Tr.s(4342)
-  val ios_clone_signin_open: String get() = Tr.s(4343)
-  val ios_clone_loading: String get() = Tr.s(4344)
-  val mobile_tab_inbox: String get() = Tr.s(4345)
-  val mobile_tab_crew: String get() = Tr.s(4346)
-  val mobile_tab_bench: String get() = Tr.s(4347)
-  val mobile_inbox_clear: String get() = Tr.s(4348)
-  val mobile_inbox_clear_note: String get() = Tr.s(4349)
-  val mobile_inbox_talk_bub: String get() = Tr.s(4350)
-  val mobile_inbox_jump_in: String get() = Tr.s(4351)
-  val mobile_inbox_open_bench: String get() = Tr.s(4352)
-  val mobile_badge_pcb: String get() = Tr.s(4353)
-  val mobile_pill_waiting: String get() = Tr.s(4354)
-  fun mobile_snooze_wakes(time: Any): String = Tr.f(4355, arrayOf<Any>(time))
-  val mobile_bench_all: String get() = Tr.s(4356)
-  val mobile_snooze_for: String get() = Tr.s(4357)
-  val mobile_conn_reconnecting: String get() = Tr.s(4358)
-  val ios_enterprise_alerts: String get() = Tr.s(4359)
-  val ios_enterprise_url_https: String get() = Tr.s(4360)
-  val ios_enterprise_token_enter: String get() = Tr.s(4361)
-  val ios_enterprise_url_invalid: String get() = Tr.s(4362)
-  val ios_enterprise_token_unsaved: String get() = Tr.s(4363)
-  val ios_enterprise_token_refused: String get() = Tr.s(4364)
-  val ios_enterprise_too_many: String get() = Tr.s(4365)
-  val ios_enterprise_server_answered: String get() = Tr.s(4366)
-  val ios_enterprise_registered: String get() = Tr.s(4367)
-  val ios_enterprise_registered_muted: String get() = Tr.s(4368)
-  val ios_enterprise_expired: String get() = Tr.s(4369)
-  val mobile_crew_empty: String get() = Tr.s(4370)
-  val sidebar_sections_needs: String get() = Tr.s(4371)
-  val sidebar_sections_pinned: String get() = Tr.s(4372)
-  val sidebar_sections_active: String get() = Tr.s(4373)
-  val sidebar_sections_quiet: String get() = Tr.s(4374)
-  val sidebar_sections_quiet_hint: String get() = Tr.s(4375)
-  val sidebar_sections_running_word: String get() = Tr.s(4376)
-  val sidebar_sections_recent: String get() = Tr.s(4377)
-  val sidebar_sections_limit: String get() = Tr.s(4378)
-  val sidebar_sections_cut: String get() = Tr.s(4379)
-  val sidebar_sections_monitoring: String get() = Tr.s(4380)
-  val sidebar_sections_stopped: String get() = Tr.s(4381)
-  val sidebar_sections_done: String get() = Tr.s(4382)
-  val sidebar_sections_failed: String get() = Tr.s(4383)
-  val sidebar_sections_rename: String get() = Tr.s(4384)
-  val sidebar_sections_pin: String get() = Tr.s(4385)
-  val sidebar_sections_unpin: String get() = Tr.s(4386)
-  val sidebar_sections_quiet_make: String get() = Tr.s(4387)
-  val sidebar_sections_quiet_back: String get() = Tr.s(4388)
-  val sidebar_sections_quiet_hint2: String get() = Tr.s(4389)
-  fun gpui_sections_move_to(group: Any): String = Tr.f(4390, arrayOf<Any>(group))
-  val sidebar_sections_move: String get() = Tr.s(4391)
-  val sidebar_sections_new_group: String get() = Tr.s(4392)
-  val sidebar_sections_new_group_title: String get() = Tr.s(4393)
-  fun sidebar_sections_remove_ask(project: Any): String = Tr.f(4394, arrayOf<Any>(project))
-  fun gpui_sections_running(n: Number): String = Tr.f(4395, arrayOf<Any>(n))
-  fun gpui_sections_done(n: Number): String = Tr.f(4396, arrayOf<Any>(n))
-  fun gpui_sections_rest(n: Number): String = Tr.f(4397, arrayOf<Any>(n))
-  fun gpui_projects_mech(n: Any): String = Tr.f(4398, arrayOf<Any>(n))
-  val gpui_open_folder: String get() = Tr.s(4399)
-  val gpui_picker_none: String get() = Tr.s(4400)
-  val gpui_picker_key_select: String get() = Tr.s(4401)
-  val gpui_picker_key_into: String get() = Tr.s(4402)
-  val gpui_picker_key_complete: String get() = Tr.s(4403)
-  val gpui_picker_key_open: String get() = Tr.s(4404)
-  val gpui_picker_added: String get() = Tr.s(4405)
-  fun gpui_picker_more_typed(n: Any): String = Tr.f(4406, arrayOf<Any>(n))
-  val gpui_clone_tab: String get() = Tr.s(4407)
-  val gpui_clone_change: String get() = Tr.s(4408)
-  val gpui_clone_thread: String get() = Tr.s(4409)
-  val gpui_clone_retry: String get() = Tr.s(4410)
-  val gpui_clone_signin: String get() = Tr.s(4411)
-  val gpui_clone_back: String get() = Tr.s(4412)
-  val gpui_clone_open_thread: String get() = Tr.s(4413)
-  val gpui_clone_open_project: String get() = Tr.s(4414)
-  val gpui_clone_private: String get() = Tr.s(4415)
-  val gpui_clone_loading: String get() = Tr.s(4416)
-  val gpui_clone_signin_list: String get() = Tr.s(4417)
-  val gpui_clone_signin_code: String get() = Tr.s(4418)
-  val gpui_clone_signin_asking: String get() = Tr.s(4419)
-  val gpui_clone_signin_done: String get() = Tr.s(4420)
-  val gpui_clone_cancel: String get() = Tr.s(4421)
-  val gpui_picker_key_pick: String get() = Tr.s(4422)
-  val gpui_clone_phase_connecting: String get() = Tr.s(4423)
-  val gpui_clone_phase_receiving: String get() = Tr.s(4424)
-  val gpui_clone_phase_resolving: String get() = Tr.s(4425)
-  val gpui_clone_phase_updating: String get() = Tr.s(4426)
-  val gpui_clone_phase_counting: String get() = Tr.s(4427)
-  val gpui_clone_phase_compressing: String get() = Tr.s(4428)
-  val gpui_clone_phase_lfs: String get() = Tr.s(4429)
-  val gpui_clone_phase_adding: String get() = Tr.s(4430)
-  val gpui_clone_phase_starting: String get() = Tr.s(4431)
-  val gpui_assembly: String get() = Tr.s(4432)
-  val gpui_mech: String get() = Tr.s(4433)
-  val gpui_readme: String get() = Tr.s(4434)
-  val gpui_board: String get() = Tr.s(4435)
-  val gpui_schematic: String get() = Tr.s(4436)
-  val gpui_view_three_d: String get() = Tr.s(4437)
-  val gpui_files: String get() = Tr.s(4438)
-  val gpui_usage_bot: String get() = Tr.s(4439)
-  val gpui_usage_tokens: String get() = Tr.s(4440)
-  val gpui_usage_accounts_tip: String get() = Tr.s(4441)
-  val gpui_usage_feeds: String get() = Tr.s(4442)
-  val gpui_usage_lanes: String get() = Tr.s(4443)
-  val gpui_usage_turn_live: String get() = Tr.s(4444)
-  val gpui_usage_chat: String get() = Tr.s(4445)
-  val gpui_usage_today: String get() = Tr.s(4446)
-  val gpui_usage_prefs: String get() = Tr.s(4447)
-  val gpui_usage_handover: String get() = Tr.s(4448)
-  val gpui_usage_none_waiting: String get() = Tr.s(4449)
-  val gpui_usage_session: String get() = Tr.s(4450)
-  val gpui_usage_last_handover: String get() = Tr.s(4451)
-  val gpui_usage_triage: String get() = Tr.s(4452)
-  val gpui_usage_office: String get() = Tr.s(4453)
-  val gpui_usage_office_lower: String get() = Tr.s(4454)
-  val gpui_usage_compact: String get() = Tr.s(4455)
-  val gpui_usage_switch: String get() = Tr.s(4456)
-  val gpui_usage_note: String get() = Tr.s(4457)
-  val gpui_usage_lanes_note: String get() = Tr.s(4458)
-  val gpui_usage_lanes_routines: String get() = Tr.s(4459)
-  val gpui_usage_turns_many: String get() = Tr.s(4460)
-  val gpui_usage_turns_full: String get() = Tr.s(4461)
-  val gpui_usage_turns_one: String get() = Tr.s(4462)
-  fun gpui_usage_turns_n(n: Any): String = Tr.f(4463, arrayOf<Any>(n))
-  fun gpui_usage_left(n: Any): String = Tr.f(4464, arrayOf<Any>(n))
-  fun gpui_usage_of(a: Any, b: Any): String = Tr.f(4465, arrayOf<Any>(a, b))
-  fun gpui_usage_context(n: Any): String = Tr.f(4466, arrayOf<Any>(n))
-  val gpui_usage_noread: String get() = Tr.s(4467)
-  fun gpui_mgmt_bom_summary(parts: Number, lines: Number): String = Tr.f(4468, arrayOf<Any>(parts, lines))
-  fun gpui_mgmt_bom_more(n: Number): String = Tr.f(4469, arrayOf<Any>(n))
-  val gpui_mgmt_dock_right: String get() = Tr.s(4470)
-  val gpui_mgmt_dock_bottom: String get() = Tr.s(4471)
-  val gpui_mgmt_close: String get() = Tr.s(4472)
-  val gpui_mgmt_bom_saved: String get() = Tr.s(4473)
-  val gpui_mgmt_bom_reading: String get() = Tr.s(4474)
-  val gpui_mgmt_bom_nomatch: String get() = Tr.s(4475)
-  val gpui_mgmt_bom_nompn: String get() = Tr.s(4476)
-  val gpui_mgmt_filter: String get() = Tr.s(4477)
-  val gpui_mgmt_bom_noparts: String get() = Tr.s(4478)
-  val gpui_mgmt_bom_dnp: String get() = Tr.s(4479)
-  val gpui_mgmt_fab_tab: String get() = Tr.s(4480)
-  val gpui_mgmt_fab_drc_current: String get() = Tr.s(4481)
-  val gpui_mgmt_fab_drc_stale: String get() = Tr.s(4482)
-  val gpui_mgmt_fab_drc_update: String get() = Tr.s(4483)
-  val gpui_mgmt_fab_drc_none: String get() = Tr.s(4484)
-  val gpui_mgmt_fab_drc_write: String get() = Tr.s(4485)
-  val gpui_mgmt_fab_drc_noproject: String get() = Tr.s(4486)
-  val gpui_mgmt_fab_tier_extra: String get() = Tr.s(4487)
-  val gpui_mgmt_fab_tier_free: String get() = Tr.s(4488)
-  val gpui_mgmt_fab_reading: String get() = Tr.s(4489)
-  val gpui_mgmt_fab_thefab: String get() = Tr.s(4490)
-  val gpui_mgmt_fab_refresh: String get() = Tr.s(4491)
-  val gpui_mgmt_fab_apply: String get() = Tr.s(4492)
-  val gpui_mgmt_fab_changed: String get() = Tr.s(4493)
-  val gpui_mgmt_fab_seen: String get() = Tr.s(4494)
-  val gpui_mgmt_fab_limit: String get() = Tr.s(4495)
-  val gpui_mgmt_fab_free: String get() = Tr.s(4496)
-  val gpui_mgmt_fab_extra: String get() = Tr.s(4497)
-  val gpui_mgmt_fab_readcol: String get() = Tr.s(4498)
-  val gpui_mgmt_fab_derived: String get() = Tr.s(4499)
-  fun gpui_mgmt_fab_suggestion(what: Any, project: Any, fab: Any): String = Tr.f(4500, arrayOf<Any>(what, project, fab))
-  fun gpui_mgmt_fab_read(rev: Any, day: Any): String = Tr.f(4501, arrayOf<Any>(rev, day))
-  val gpui_mgmt_fab_reviewing: String get() = Tr.s(4502)
-  val gpui_mgmt_fab_noreview: String get() = Tr.s(4503)
-  val gpui_mgmt_fab_findings: String get() = Tr.s(4504)
-  val gpui_mgmt_fab_reviewbtn: String get() = Tr.s(4505)
-  val gpui_mgmt_fab_judge: String get() = Tr.s(4506)
-  val gpui_mgmt_plan_reading: String get() = Tr.s(4507)
-  val gpui_mgmt_plan_none: String get() = Tr.s(4508)
-  fun gpui_mgmt_plan_awaiting(n: Number): String = Tr.f(4509, arrayOf<Any>(n))
-  val gpui_mgmt_plan_nothing: String get() = Tr.s(4510)
-  val gpui_mgmt_plan_saved: String get() = Tr.s(4511)
-  val gpui_mgmt_plan_all: String get() = Tr.s(4512)
-  val gpui_mgmt_plan_stop: String get() = Tr.s(4513)
-  val gpui_mgmt_plan_hide: String get() = Tr.s(4514)
-  val gpui_mgmt_plan_show: String get() = Tr.s(4515)
-  val gpui_mgmt_plan_done: String get() = Tr.s(4516)
-  val gpui_mgmt_plan_layer: String get() = Tr.s(4517)
-  val gpui_mgmt_plan_reject: String get() = Tr.s(4518)
-  val gpui_mgmt_plan_keysnote: String get() = Tr.s(4519)
-  fun gpui_mgmt_plan_reference(layer: Any): String = Tr.f(4520, arrayOf<Any>(layer))
-  fun gpui_mgmt_plan_nets(n: Number): String = Tr.f(4521, arrayOf<Any>(n))
-  val gpui_mgmt_plan_tab: String get() = Tr.s(4522)
-  val gpui_mgmt_plan_before: String get() = Tr.s(4523)
-  val gpui_mgmt_plan_onwords: String get() = Tr.s(4524)
-  val gpui_mgmt_plan_offwords: String get() = Tr.s(4525)
-  fun gpui_mgmt_plan_elsewhere(board: Any): String = Tr.f(4526, arrayOf<Any>(board))
-  val gpui_mgmt_plan_openboard: String get() = Tr.s(4527)
-  val gpui_mgmt_plan_noboard: String get() = Tr.s(4528)
-  val gpui_mgmt_plan_drawn: String get() = Tr.s(4529)
-  val gpui_pick_planonce: String get() = Tr.s(4530)
-  val gpui_pick_planonce_note: String get() = Tr.s(4531)
-  val hub_view_board_unlisted: String get() = Tr.s(4532)
-  val gpui_mgmt_bom_stocknote: String get() = Tr.s(4533)
-  val hub_order_pick_more: String get() = Tr.s(4534)
-  val hub_order_pick_phone: String get() = Tr.s(4535)
-  val hub_order_pick_go: String get() = Tr.s(4536)
-  val gpui_plan_before_routing_desc: String get() = Tr.s(4537)
-  fun gpui_mgmt_bom_shared(others: Any): String = Tr.f(4538, arrayOf<Any>(others))
-  fun gpui_mgmt_fab_review(must: Any, should: Any, notes: Any): String = Tr.f(4539, arrayOf<Any>(must, should, notes))
-  fun gpui_mgmt_fab_stackup(id: Any, w: Any): String = Tr.f(4540, arrayOf<Any>(id, w))
-  val gpui_mgmt_fab_proposed: String get() = Tr.s(4541)
-  val gpui_mgmt_fab_use: String get() = Tr.s(4542)
-  val gpui_keys_mgmt_bom: String get() = Tr.s(4543)
-  val gpui_keys_mgmt_checks: String get() = Tr.s(4544)
-  val gpui_keys_mgmt_life: String get() = Tr.s(4545)
-  val gpui_mgmt_checks_reading: String get() = Tr.s(4546)
-  val gpui_mgmt_checks_searching: String get() = Tr.s(4547)
-  val gpui_mgmt_checks_run: String get() = Tr.s(4548)
-  val gpui_mgmt_checks_running: String get() = Tr.s(4549)
-  fun gpui_mgmt_checks_behind(what: Any): String = Tr.f(4550, arrayOf<Any>(what))
-  val gpui_mgmt_checks_stale: String get() = Tr.s(4551)
-  val gpui_mgmt_checks_liveunsaved: String get() = Tr.s(4552)
-  fun gpui_mgmt_checks_waiting(why: Any): String = Tr.f(4553, arrayOf<Any>(why))
-  fun gpui_mgmt_checks_failed(why: Any): String = Tr.f(4554, arrayOf<Any>(why))
-  val gpui_mgmt_checks_all: String get() = Tr.s(4555)
-  val gpui_mgmt_checks_errors: String get() = Tr.s(4556)
-  val gpui_mgmt_checks_warnings: String get() = Tr.s(4557)
-  val gpui_mgmt_checks_excluded: String get() = Tr.s(4558)
-  val gpui_mgmt_checks_fix: String get() = Tr.s(4559)
-  val gpui_mgmt_checks_reexport: String get() = Tr.s(4560)
-  fun gpui_mgmt_checks_more(n: Number): String = Tr.f(4561, arrayOf<Any>(n))
-  val gpui_mgmt_checks_fewer: String get() = Tr.s(4562)
-  val gpui_mgmt_checks_none: String get() = Tr.s(4563)
-  val gpui_mgmt_checks_nomatch: String get() = Tr.s(4564)
-  val gpui_mgmt_checks_library: String get() = Tr.s(4565)
-  val gpui_mgmt_checks_withlib: String get() = Tr.s(4566)
-  val gpui_mgmt_checks_fullrun: String get() = Tr.s(4567)
-  val gpui_mgmt_checks_allsources: String get() = Tr.s(4568)
-  val gpui_mgmt_checks_judged: String get() = Tr.s(4569)
-  val gpui_mgmt_bom_dnp_tip: String get() = Tr.s(4570)
-  val gpui_mgmt_bom_writing: String get() = Tr.s(4571)
-  val gpui_mgmt_bom_inkicad: String get() = Tr.s(4572)
-  val gpui_mgmt_bom_saved_file: String get() = Tr.s(4573)
-  val gpui_mgmt_bom_fab: String get() = Tr.s(4574)
-  val gpui_mgmt_bom_mpn_ph: String get() = Tr.s(4575)
-  val gpui_mgmt_bom_fab_ph: String get() = Tr.s(4576)
-  fun gpui_mgmt_bom_each(price: Any, n: Any): String = Tr.f(4577, arrayOf<Any>(price, n))
-  fun gpui_mgmt_bom_out(n: Any, need: Any): String = Tr.f(4578, arrayOf<Any>(n, need))
-  fun gpui_mgmt_bom_low(n: Any): String = Tr.f(4579, arrayOf<Any>(n))
-  fun gpui_mgmt_bom_in(n: Any): String = Tr.f(4580, arrayOf<Any>(n))
-  fun gpui_mgmt_bom_cost(cost: Any): String = Tr.f(4581, arrayOf<Any>(cost))
-  fun gpui_mgmt_bom_cost_least(cost: Any): String = Tr.f(4582, arrayOf<Any>(cost))
-  val gpui_mgmt_bom_checking: String get() = Tr.s(4583)
-  val gpui_mgmt_bom_notknown: String get() = Tr.s(4584)
-  val gpui_mgmt_bom_stock: String get() = Tr.s(4585)
-  val gpui_mgmt_bom_alts: String get() = Tr.s(4586)
-  val gpui_mgmt_bom_alts_looking: String get() = Tr.s(4587)
-  val gpui_mgmt_bom_alts_none: String get() = Tr.s(4588)
-  val gpui_mgmt_bom_alts_use: String get() = Tr.s(4589)
-  val gpui_mgmt_bom_class_basic: String get() = Tr.s(4590)
-  val gpui_mgmt_bom_class_extended: String get() = Tr.s(4591)
-  val gpui_mgmt_bom_class_preferred: String get() = Tr.s(4592)
-  val gpui_mgmt_bom_notinstock: String get() = Tr.s(4593)
-  val gpui_mgmt_bom_off: String get() = Tr.s(4594)
-  fun gpui_mgmt_life_since(day: Any, n: Number): String = Tr.f(4595, arrayOf<Any>(day, n))
-  fun gpui_mgmt_life_one(day: Any): String = Tr.f(4596, arrayOf<Any>(day))
-  fun gpui_mgmt_life_now(cost: Any, n: Any, lines: Any): String = Tr.f(4597, arrayOf<Any>(cost, n, lines))
-  fun gpui_mgmt_life_part_now(stock: Any, price: Any): String = Tr.f(4598, arrayOf<Any>(stock, price))
-  fun gpui_mgmt_life_instock(lines: Any): String = Tr.f(4599, arrayOf<Any>(lines))
-  val gpui_mgmt_life_board: String get() = Tr.s(4600)
-  val gpui_mgmt_life_price: String get() = Tr.s(4601)
-  val gpui_mgmt_life_active: String get() = Tr.s(4602)
-  val gpui_mgmt_life_nrnd: String get() = Tr.s(4603)
-  val gpui_mgmt_life_eol: String get() = Tr.s(4604)
-  val gpui_mgmt_life_unknown: String get() = Tr.s(4605)
-  val gpui_mgmt_life_nolines: String get() = Tr.s(4606)
-  val gpui_mgmt_life_noread: String get() = Tr.s(4607)
-  val gpui_mgmt_life_reading: String get() = Tr.s(4608)
-  val gpui_mgmt_life_nopart: String get() = Tr.s(4609)
-  val gpui_mgmt_life_tab: String get() = Tr.s(4610)
-  val gpui_mgmt_bom_paused: String get() = Tr.s(4611)
-  val gpui_mgmt_bom_paused_tip: String get() = Tr.s(4612)
-  val gpui_keys_mgmt_fab: String get() = Tr.s(4613)
-  val gpui_mgmt_bom_putback: String get() = Tr.s(4614)
-  val gpui_mgmt_bom_nochange: String get() = Tr.s(4615)
-  val gpui_mgmt_bom_deferred: String get() = Tr.s(4616)
-  val gpui_mgmt_bom_inkicad_save: String get() = Tr.s(4617)
-  val gpui_mgmt_bom_undo_tip: String get() = Tr.s(4618)
-  val gpui_mgmt_bom_undo: String get() = Tr.s(4619)
-  fun gpui_mgmt_checks_on(host: Any): String = Tr.f(4620, arrayOf<Any>(host))
-  val gpui_gerbers: String get() = Tr.s(4621)
-  val gpui_gerbers_vs: String get() = Tr.s(4622)
-  val gpui_gerbers_vs_tip: String get() = Tr.s(4623)
-  val gpui_gerbers_gerbview: String get() = Tr.s(4624)
-  val gpui_gerbers_gerbview_tip: String get() = Tr.s(4625)
-  val gpui_mgmt_bom_saved_state: String get() = Tr.s(4626)
-  val gpui_mgmt_bom_live_tip: String get() = Tr.s(4627)
-  val gpui_mgmt_bom_saved_tip: String get() = Tr.s(4628)
-  val gpui_mgmt_bom_price: String get() = Tr.s(4629)
-  val gpui_mgmt_bom_class: String get() = Tr.s(4630)
-  fun gpui_mgmt_life_unknown_n(n: Any): String = Tr.f(4631, arrayOf<Any>(n))
-  fun gpui_mgmt_life_unknown_tip(a: Any, b: Any): String = Tr.f(4632, arrayOf<Any>(a, b))
-  fun gpui_mgmt_bom_stock_out(n: Any): String = Tr.f(4633, arrayOf<Any>(n))
-  fun gpui_mgmt_bom_stock_low(n: Any): String = Tr.f(4634, arrayOf<Any>(n))
-  val gpui_gerbers_boardonly: String get() = Tr.s(4635)
-  val gpui_gerbers_gerbersonly: String get() = Tr.s(4636)
-  fun gpui_mgmt_life_price_since(day: Any): String = Tr.f(4637, arrayOf<Any>(day))
-  fun gpui_streamer_account(n: Any): String = Tr.f(4638, arrayOf<Any>(n))
-  fun gpui_streamer_project(n: Any): String = Tr.f(4639, arrayOf<Any>(n))
-  fun gpui_streamer_group(n: Any): String = Tr.f(4640, arrayOf<Any>(n))
-  val gpui_streamer_mode: String get() = Tr.s(4641)
-  val gpui_streamer_section: String get() = Tr.s(4642)
-  val gpui_streamer_off: String get() = Tr.s(4643)
-  val gpui_streamer_on: String get() = Tr.s(4644)
-  val gpui_streamer_tip: String get() = Tr.s(4645)
-  val gpui_streamer_shared: String get() = Tr.s(4646)
-  val gpui_streamer_qr: String get() = Tr.s(4647)
-  val gpui_streamer_note: String get() = Tr.s(4648)
-  val gpui_streamer_share: String get() = Tr.s(4649)
-  val gpui_streamer_apps: String get() = Tr.s(4650)
-  val gpui_streamer_apps_note: String get() = Tr.s(4651)
-  val gpui_streamer_linux: String get() = Tr.s(4652)
-  val gpui_streamer_mac: String get() = Tr.s(4653)
-  val gpui_streamer_win: String get() = Tr.s(4654)
-  val gpui_f2_uber_title: String get() = Tr.s(4655)
-  val gpui_f2_uber_body: String get() = Tr.s(4656)
-  val gpui_f2_uber_say: String get() = Tr.s(4657)
-  val gpui_f2_uber_here: String get() = Tr.s(4658)
-  val gpui_f2_uber_err_name: String get() = Tr.s(4659)
-  val gpui_f2_uber_err_color: String get() = Tr.s(4660)
-  val gpui_f2_uber_color: String get() = Tr.s(4661)
-  val gpui_f2_uber_own: String get() = Tr.s(4662)
-  val gpui_f2_uber_custom: String get() = Tr.s(4663)
-  val gpui_f2_uber_hex: String get() = Tr.s(4664)
-  val gpui_f2_uber_use: String get() = Tr.s(4665)
-  val gpui_f2_uber_shuffle: String get() = Tr.s(4666)
-  val gpui_f2_uber_auto: String get() = Tr.s(4667)
-  val gpui_f2_uber_savename: String get() = Tr.s(4668)
-  val gpui_f2_uber_p_ginger: String get() = Tr.s(4669)
-  val gpui_f2_uber_p_cream: String get() = Tr.s(4670)
-  val gpui_f2_uber_p_smoke: String get() = Tr.s(4671)
-  val gpui_f2_uber_p_midnight: String get() = Tr.s(4672)
-  val gpui_f2_uber_p_cocoa: String get() = Tr.s(4673)
-  val gpui_f2_uber_p_sky: String get() = Tr.s(4674)
-  val gpui_f2_uber_p_lilac: String get() = Tr.s(4675)
-  val gpui_f2_uber_p_rose: String get() = Tr.s(4676)
-  val gpui_f2_uber_p_mint: String get() = Tr.s(4677)
-  val gpui_f2_uber_p_cherry: String get() = Tr.s(4678)
-  val gpui_simulation: String get() = Tr.s(4679)
-  val gpui_c_sheets_find: String get() = Tr.s(4680)
-  fun history_snap(turn: Any): String = Tr.f(4681, arrayOf<Any>(turn))
-  val history_ref_snap: String get() = Tr.s(4682)
-  val thread_restore_action: String get() = Tr.s(4683)
-  val thread_restore_ask: String get() = Tr.s(4684)
-  val thread_restore_note: String get() = Tr.s(4685)
-  val thread_restore_go: String get() = Tr.s(4686)
-  val mouse_mouseandtrackpad0: String get() = Tr.s(4687)
-  val mouse_zoomdirection1: String get() = Tr.s(4688)
-  val mouse_appliestothewheelandatrackpads2: String get() = Tr.s(4689)
-  val mouse_normal3: String get() = Tr.s(4690)
-  val mouse_inverted4: String get() = Tr.s(4691)
-  val mouse_boardandschematic5: String get() = Tr.s(4692)
-  val mouse_k3dandstep6: String get() = Tr.s(4693)
-  val mouse_changedfromitspreseteachinputd7: String get() = Tr.s(4694)
-  val mouse_apresetsetseveryinputbeloweach8: String get() = Tr.s(4695)
-  val mouse_legacy10: String get() = Tr.s(4696)
-  val mouse_leftdrag11: String get() = Tr.s(4697)
-  val mouse_middledrag12: String get() = Tr.s(4698)
-  val mouse_rightdrag13: String get() = Tr.s(4699)
-  val mouse_shiftleftdrag14: String get() = Tr.s(4700)
-  val mouse_ctrlleftdrag15: String get() = Tr.s(4701)
-  val mouse_altleftdrag16: String get() = Tr.s(4702)
-  val mouse_wheel17: String get() = Tr.s(4703)
-  val mouse_shiftwheel18: String get() = Tr.s(4704)
-  val mouse_ctrlwheel19: String get() = Tr.s(4705)
-  val mouse_altwheel20: String get() = Tr.s(4706)
-  val mouse_nothing21: String get() = Tr.s(4707)
-  val mouse_pan22: String get() = Tr.s(4708)
-  val mouse_pansideways23: String get() = Tr.s(4709)
-  val mouse_panupanddown24: String get() = Tr.s(4710)
-  val mouse_zoom25: String get() = Tr.s(4711)
-  val mouse_rotate26: String get() = Tr.s(4712)
-  val mouse_roll27: String get() = Tr.s(4713)
-  val mouse_select28: String get() = Tr.s(4714)
-  val mouse_aclickwithoutmovingwithnokeyhe29: String get() = Tr.s(4715)
-  val mouse_leftbutton30: String get() = Tr.s(4716)
-  val mouse_middlebutton31: String get() = Tr.s(4717)
-  val mouse_rightbutton32: String get() = Tr.s(4718)
-  val mouse_twofingerscroll33: String get() = Tr.s(4719)
-  val mouse_atrackpadstwofingerswithctrlhe34: String get() = Tr.s(4720)
-  val mouse_pans35: String get() = Tr.s(4721)
-  val mouse_isthewheel36: String get() = Tr.s(4722)
-  val mouse_pinch37: String get() = Tr.s(4723)
-  val mouse_atrackpadpinch38: String get() = Tr.s(4724)
-  val mouse_zooms39: String get() = Tr.s(4725)
-  val mouse_chooseaninputforitabove41: String get() = Tr.s(4726)
-  val mouse_nothingissettopan42: String get() = Tr.s(4727)
-  val mouse_nothingissettozoom43: String get() = Tr.s(4728)
-  val mouse_nothingissettorotate44: String get() = Tr.s(4729)
-  val gpui_review_mark: String get() = Tr.s(4730)
-  val gpui_review_mark_tip: String get() = Tr.s(4731)
-  val gpui_review_why: String get() = Tr.s(4732)
-  val gpui_review_allow: String get() = Tr.s(4733)
-  val gpui_review_allow_tip: String get() = Tr.s(4734)
-  val gpui_review_off: String get() = Tr.s(4735)
-  val gpui_review_again: String get() = Tr.s(4736)
-  val gpui_review_again_tip: String get() = Tr.s(4737)
-  val gpui_rail_no_board: String get() = Tr.s(4738)
-  val gpui_rail_no_schematic: String get() = Tr.s(4739)
-  val gpui_rail_split_needs_both: String get() = Tr.s(4740)
-  val gpui_rail_no_mech: String get() = Tr.s(4741)
-  val gpui_panestate_next_board: String get() = Tr.s(4742)
-  val gpui_panestate_next_schematic: String get() = Tr.s(4743)
-  val gpui_panestate_next_solid: String get() = Tr.s(4744)
-  val gpui_panestate_empty_gerbers: String get() = Tr.s(4745)
-  val gpui_panestate_next_gerbers: String get() = Tr.s(4746)
-  val gpui_panestate_gerbers_noboard: String get() = Tr.s(4747)
-  val gpui_panestate_gerbers_noboard_next: String get() = Tr.s(4748)
-  val gpui_panestate_empty_mech: String get() = Tr.s(4749)
-  val gpui_panestate_next_mech: String get() = Tr.s(4750)
-  val gpui_panestate_loading_split: String get() = Tr.s(4751)
-  val gpui_panestate_retrying: String get() = Tr.s(4752)
-  val gpui_hub_view_notready: String get() = Tr.s(4753)
-  val gpui_hub_view_staleconn: String get() = Tr.s(4754)
-  val gpui_hub_view_unavailable: String get() = Tr.s(4755)
-  val settings_designmode_label: String get() = Tr.s(4756)
-  val settings_designmode_viewer: String get() = Tr.s(4757)
-  val settings_designmode_kicad: String get() = Tr.s(4758)
-  val settings_designmode_note: String get() = Tr.s(4759)
-  val review_empty_title: String get() = Tr.s(4760)
-  val review_empty_next: String get() = Tr.s(4761)
-  val viewer_diff_threadchanges: String get() = Tr.s(4762)
-  val viewer_layout_refusal_locked: String get() = Tr.s(4763)
-  val viewer_layout_refusal_toosmall: String get() = Tr.s(4764)
-  val viewer_layout_refusal_onekicad: String get() = Tr.s(4765)
-  val viewer_layout_refusal_incompatibleoverlay: String get() = Tr.s(4766)
-  val viewer_layout_refusal_notfound: String get() = Tr.s(4767)
-  val viewer_layout_refusal_nooverlay: String get() = Tr.s(4768)
-  val viewer_layout_refusal_invalidsource: String get() = Tr.s(4769)
-  val viewer_layout_refusal_sametile: String get() = Tr.s(4770)
-  val viewer_layout_refusal_invalidratio: String get() = Tr.s(4771)
-  val viewer_layout_refusal_duplicateid: String get() = Tr.s(4772)
-  val viewer_layout_refusal_unknownframe: String get() = Tr.s(4773)
-  val viewer_layout_refusal_invalidinput: String get() = Tr.s(4774)
-  val viewer_layout_refusal_toomany: String get() = Tr.s(4775)
-  val viewer_layout_refusal_toomanysources: String get() = Tr.s(4776)
-  val viewer_layout_refusal_unresolvedversion: String get() = Tr.s(4777)
-  val viewer_layout_refusal_nohistory: String get() = Tr.s(4778)
-  val viewer_layout_refusal_linked: String get() = Tr.s(4779)
-  val viewer_layout_refusal_notondevice: String get() = Tr.s(4780)
-  val viewer_layout_refusal_starting: String get() = Tr.s(4781)
-  val viewer_footprinteditor: String get() = Tr.s(4782)
-  val viewer_symboleditor: String get() = Tr.s(4783)
-  val web_clone_tab: String get() = Tr.s(4784)
-  val web_clone_repo_placeholder: String get() = Tr.s(4785)
-  val web_clone_private: String get() = Tr.s(4786)
-  val web_clone_signin: String get() = Tr.s(4787)
-  val web_clone_signin_wait: String get() = Tr.s(4788)
-  val web_clone_signin_enter: String get() = Tr.s(4789)
-  val web_clone_signin_done: String get() = Tr.s(4790)
-  val web_clone_copied: String get() = Tr.s(4791)
-  val web_clone_change_folder: String get() = Tr.s(4792)
-  val web_clone_folder_name: String get() = Tr.s(4793)
-  val web_clone_start_thread: String get() = Tr.s(4794)
-  fun web_clone_first(text: Any): String = Tr.f(4795, arrayOf<Any>(text))
-  val web_clone_same: String get() = Tr.s(4796)
-  val web_clone_go: String get() = Tr.s(4797)
-  fun web_clone_cloning(repo: Any, dest: Any): String = Tr.f(4798, arrayOf<Any>(repo, dest))
-  fun web_clone_cloned(repo: Any, dest: Any): String = Tr.f(4799, arrayOf<Any>(repo, dest))
-  fun web_clone_stopped(repo: Any): String = Tr.f(4800, arrayOf<Any>(repo))
-  val web_clone_retry: String get() = Tr.s(4801)
-  val web_clone_back: String get() = Tr.s(4802)
-  val web_clone_open_thread: String get() = Tr.s(4803)
-  val web_clone_open_project: String get() = Tr.s(4804)
-  fun web_clone_add_dir(dir: Any): String = Tr.f(4805, arrayOf<Any>(dir))
-  fun web_clone_use_dir(dir: Any): String = Tr.f(4806, arrayOf<Any>(dir))
-  val web_clone_up: String get() = Tr.s(4807)
-  val web_clone_loading: String get() = Tr.s(4808)
-  val web_clone_no_folders: String get() = Tr.s(4809)
-  fun gpui_c_kicad_opening(editor: Any, job: Any, secs: Any): String = Tr.f(4810, arrayOf<Any>(editor, job, secs))
-  fun gpui_c_kicad_openingbare(editor: Any, secs: Any): String = Tr.f(4811, arrayOf<Any>(editor, secs))
-  fun gpui_c_kicad_openfailed(editor: Any): String = Tr.f(4812, arrayOf<Any>(editor))
-  val viewer_tile_rail_add: String get() = Tr.s(4813)
-  val viewer_tile_add: String get() = Tr.s(4814)
-  val viewer_tile_maximize: String get() = Tr.s(4815)
-  val viewer_tile_restore: String get() = Tr.s(4816)
-  val viewer_tile_focus: String get() = Tr.s(4817)
-  val viewer_tile_embedded: String get() = Tr.s(4818)
-  val viewer_tile_simulation_single: String get() = Tr.s(4819)
-  val viewer_tile_add_tip: String get() = Tr.s(4820)
-  val viewer_tile_left: String get() = Tr.s(4821)
-  val viewer_tile_right: String get() = Tr.s(4822)
-  val viewer_tile_top: String get() = Tr.s(4823)
-  val viewer_tile_bottom: String get() = Tr.s(4824)
-  val web_pair_subtitle: String get() = Tr.s(4825)
-  val web_pair_name: String get() = Tr.s(4826)
-  val web_pair_request: String get() = Tr.s(4827)
-  val web_pair_code: String get() = Tr.s(4828)
-  fun web_pair_approve_in(time: Any): String = Tr.f(4829, arrayOf<Any>(time))
-  val web_pair_expired: String get() = Tr.s(4830)
-  val web_pair_approved: String get() = Tr.s(4831)
-  val web_pair_denied: String get() = Tr.s(4832)
-  val web_pair_cancelled: String get() = Tr.s(4833)
-  val web_pair_requesting: String get() = Tr.s(4834)
-  fun web_pair_failed(status: Any): String = Tr.f(4835, arrayOf<Any>(status))
-  val web_pair_ratelimited: String get() = Tr.s(4836)
-  val web_pair_nocode: String get() = Tr.s(4837)
-  val web_pair_unreachable: String get() = Tr.s(4838)
-  val web_chat_loading: String get() = Tr.s(4839)
-  val web_chat_choose: String get() = Tr.s(4840)
-  val web_chat_empty: String get() = Tr.s(4841)
-  val web_chat_streaming: String get() = Tr.s(4842)
-  fun web_chat_finished(time: Any): String = Tr.f(4843, arrayOf<Any>(time))
-  fun web_chat_finished_dur(time: Any, dur: Any): String = Tr.f(4844, arrayOf<Any>(time, dur))
-  val web_chat_answer_placeholder: String get() = Tr.s(4845)
-  val web_chat_answer_btn: String get() = Tr.s(4846)
-  fun web_chat_answered(answer: Any): String = Tr.f(4847, arrayOf<Any>(answer))
-  val web_chat_review_mode: String get() = Tr.s(4848)
-  val web_composer_attach: String get() = Tr.s(4849)
-  val web_composer_voice: String get() = Tr.s(4850)
-  fun web_composer_unsupported(type: Any): String = Tr.f(4851, arrayOf<Any>(type))
-  fun web_composer_maximages(max: Any): String = Tr.f(4852, arrayOf<Any>(max))
-  val web_logout_failed: String get() = Tr.s(4853)
-  val thread_context_title: String get() = Tr.s(4854)
-  val thread_context_instructions: String get() = Tr.s(4855)
-  val thread_context_system: String get() = Tr.s(4856)
-  val thread_context_skills: String get() = Tr.s(4857)
-  val thread_context_mcp: String get() = Tr.s(4858)
-  val thread_context_mcp_short: String get() = Tr.s(4859)
-  val thread_context_reading: String get() = Tr.s(4860)
-  val thread_context_none_instructions: String get() = Tr.s(4861)
-  val thread_context_none_mcp: String get() = Tr.s(4862)
-  val thread_context_native_note: String get() = Tr.s(4863)
-  val thread_context_copy: String get() = Tr.s(4864)
-  val thread_context_copied: String get() = Tr.s(4865)
-  val thread_context_base: String get() = Tr.s(4866)
-  val thread_context_injected_label: String get() = Tr.s(4867)
-  val thread_context_index: String get() = Tr.s(4868)
-  val thread_context_scope_user: String get() = Tr.s(4869)
-  val thread_context_scope_bundled: String get() = Tr.s(4870)
-  val thread_context_native: String get() = Tr.s(4871)
-  val thread_context_injected: String get() = Tr.s(4872)
-  val thread_context_cross: String get() = Tr.s(4873)
-  val thread_context_explicit: String get() = Tr.s(4874)
-  val thread_context_untrusted: String get() = Tr.s(4875)
-  val thread_context_invalid: String get() = Tr.s(4876)
-  val thread_context_trust: String get() = Tr.s(4877)
-  val thread_context_enable: String get() = Tr.s(4878)
-  val thread_context_disable: String get() = Tr.s(4879)
-  fun thread_context_size(bytes: Any, tokens: Any): String = Tr.f(4880, arrayOf<Any>(bytes, tokens))
-  val thread_context_unreachable: String get() = Tr.s(4881)
-  val gpui_planmode_top_once: String get() = Tr.s(4882)
-  val gpui_planmode_top_planning: String get() = Tr.s(4883)
-  val gpui_planmode_top_pending: String get() = Tr.s(4884)
-  val gpui_planmode_top_executing: String get() = Tr.s(4885)
-  val gpui_planmode_tip: String get() = Tr.s(4886)
-  val gpui_planmode_chip_building: String get() = Tr.s(4887)
-  val gpui_planmode_chip_once: String get() = Tr.s(4888)
-  val gpui_planmode_bar_once: String get() = Tr.s(4889)
-  val gpui_planmode_bar_always: String get() = Tr.s(4890)
-  val gpui_planmode_bar_planning: String get() = Tr.s(4891)
-  val gpui_planmode_bar_pending: String get() = Tr.s(4892)
-  val gpui_planmode_bar_executing: String get() = Tr.s(4893)
-  val gpui_planmode_scope_once: String get() = Tr.s(4894)
-  val gpui_planmode_scope_always: String get() = Tr.s(4895)
-  val gpui_ask_plan_ready: String get() = Tr.s(4896)
-  val gpui_ask_plan_revise: String get() = Tr.s(4897)
-  val gpui_ask_plan_sendrev: String get() = Tr.s(4898)
-  val gpui_ask_plan_reviseph: String get() = Tr.s(4899)
-  val gpui_mgmt_plan_st_blocked: String get() = Tr.s(4900)
-  val gpui_mgmt_plan_st_routing: String get() = Tr.s(4901)
-  val gpui_mgmt_plan_st_awaiting: String get() = Tr.s(4902)
-  val gpui_mgmt_plan_st_verified: String get() = Tr.s(4903)
-  val gpui_mgmt_plan_st_routed: String get() = Tr.s(4904)
-  val gpui_mgmt_plan_st_approved: String get() = Tr.s(4905)
-  val gpui_mgmt_plan_st_partial: String get() = Tr.s(4906)
-  val gpui_mgmt_plan_st_rejected: String get() = Tr.s(4907)
-  val gpui_mgmt_plan_st_empty: String get() = Tr.s(4908)
-  val gpui_mgmt_plan_refused: String get() = Tr.s(4909)
-  val gpui_mgmt_plan_emptysub: String get() = Tr.s(4910)
-  val gpui_mgmt_plan_verify: String get() = Tr.s(4911)
-  val gpui_mgmt_plan_reqplain: String get() = Tr.s(4912)
-  fun gpui_mgmt_plan_requested(what: Any): String = Tr.f(4913, arrayOf<Any>(what))
-  val gpui_mgmt_plan_stackup: String get() = Tr.s(4914)
-  val gpui_keys_planmode: String get() = Tr.s(4915)
-  val gpui_keys_mgmt_plan: String get() = Tr.s(4916)
-  fun web_plan_awaiting(n: Any): String = Tr.f(4917, arrayOf<Any>(n))
-  val web_plan_net_one: String get() = Tr.s(4918)
-  fun web_plan_nets(n: Any): String = Tr.f(4919, arrayOf<Any>(n))
-  val gpui_mgmt_plan_view_canvas: String get() = Tr.s(4920)
-  val gpui_mgmt_plan_view_split: String get() = Tr.s(4921)
-  val gpui_mgmt_plan_view_list: String get() = Tr.s(4922)
-  val gpui_mgmt_plan_grid_all: String get() = Tr.s(4923)
-  val gpui_mgmt_plan_grid_pair: String get() = Tr.s(4924)
-  val gpui_mgmt_plan_grid_single: String get() = Tr.s(4925)
-  val gpui_mgmt_plan_expand: String get() = Tr.s(4926)
-  val gpui_mgmt_plan_compact: String get() = Tr.s(4927)
-  val gpui_mgmt_plan_sync: String get() = Tr.s(4928)
-  val gpui_mgmt_plan_fit: String get() = Tr.s(4929)
-  val gpui_mgmt_plan_lock: String get() = Tr.s(4930)
-  val gpui_mgmt_plan_unlock: String get() = Tr.s(4931)
-  val gpui_mgmt_plan_layer_move: String get() = Tr.s(4932)
-  val gpui_mgmt_plan_width: String get() = Tr.s(4933)
-  val gpui_mgmt_plan_addnote: String get() = Tr.s(4934)
-  val gpui_mgmt_plan_note_placeholder: String get() = Tr.s(4935)
-  val gpui_mgmt_plan_hint: String get() = Tr.s(4936)
-  val gpui_mgmt_plan_rejectlayer: String get() = Tr.s(4937)
-  val gpui_mgmt_plan_edited: String get() = Tr.s(4938)
-  val gpui_mgmt_plan_locked: String get() = Tr.s(4939)
-  val gpui_mgmt_plan_noitems: String get() = Tr.s(4940)
-  val gpui_mgmt_plan_stackup_short: String get() = Tr.s(4941)
-  val gpui_mgmt_plan_layer_short: String get() = Tr.s(4942)
-  fun gpui_mgmt_plan_awaiting_short(n: Any): String = Tr.f(4943, arrayOf<Any>(n))
-  fun gpui_mgmt_plan_done_of(done: Any, total: Any): String = Tr.f(4944, arrayOf<Any>(done, total))
-  val gpui_planmode_chip_review: String get() = Tr.s(4945)
-  val mobile_plan_steer: String get() = Tr.s(4946)
-  val mobile_plan_details: String get() = Tr.s(4947)
-  val mobile_plan_reset: String get() = Tr.s(4948)
-  val mobile_plan_removepoint: String get() = Tr.s(4949)
-  val mobile_plan_touchhint: String get() = Tr.s(4950)
-  val mobile_plan_copied: String get() = Tr.s(4951)
-  fun mobile_plan_widthmm(v: Any): String = Tr.f(4952, arrayOf<Any>(v))
-  fun mobile_plan_coord(x: Any, y: Any): String = Tr.f(4953, arrayOf<Any>(x, y))
-  val provider_notice_head: String get() = Tr.s(4954)
-  val provider_notice_text_none: String get() = Tr.s(4955)
-  val provider_notice_text_signedout: String get() = Tr.s(4956)
-  val provider_notice_button: String get() = Tr.s(4957)
-  val provider_notice_senderr: String get() = Tr.s(4958)
-  fun provider_notice_senderr_remote(machine: Any): String = Tr.f(4959, arrayOf<Any>(machine))
-  val web_settings_providers: String get() = Tr.s(4960)
-  val web_settings_providers_browser: String get() = Tr.s(4961)
-  fun order_lead_days(days: Number): String = Tr.f(4962, arrayOf<Any>(days))
-  fun order_estimate_warnings(warnings: Any): String = Tr.f(4963, arrayOf<Any>(warnings))
-  val web_home_open: String get() = Tr.s(4964)
-  val web_home_fold: String get() = Tr.s(4965)
-  val web_home_unfold: String get() = Tr.s(4966)
-  val web_home_loading: String get() = Tr.s(4967)
-  val web_home_error: String get() = Tr.s(4968)
-  fun web_home_lead(n: Any): String = Tr.f(4969, arrayOf<Any>(n))
-  val web_home_lead_one: String get() = Tr.s(4970)
-  val web_ring_unavailable: String get() = Tr.s(4971)
-  val web_ring_loading: String get() = Tr.s(4972)
-  val web_ring_error: String get() = Tr.s(4973)
-  fun web_ring_count(n: Any): String = Tr.f(4974, arrayOf<Any>(n))
-  val web_ring_count_one: String get() = Tr.s(4975)
-  fun web_ring_found(found: Any, total: Any, q: Any): String = Tr.f(4976, arrayOf<Any>(found, total, q))
-  val web_ring_not_heard: String get() = Tr.s(4977)
-  val web_ring_app_words: String get() = Tr.s(4978)
-  fun web_ring_heard_by(model: Any): String = Tr.f(4979, arrayOf<Any>(model))
-  fun web_ring_heard_by_sure(model: Any, conf: Any): String = Tr.f(4980, arrayOf<Any>(model, conf))
-  val web_ring_state_sent: String get() = Tr.s(4981)
-  val web_ring_state_new: String get() = Tr.s(4982)
-  val web_ring_state_heard: String get() = Tr.s(4983)
-  val web_ring_state_failed: String get() = Tr.s(4984)
-  val web_ring_state_busy: String get() = Tr.s(4985)
-  val web_ring_no_words: String get() = Tr.s(4986)
-  val gpui_c_solidcraft_needs_hub: String get() = Tr.s(4987)
-  val gpui_c_solidcraft_local_only: String get() = Tr.s(4988)
-  val gpui_c_solidcraft_opening: String get() = Tr.s(4989)
-  val gpui_c_solidcraft_waiting: String get() = Tr.s(4990)
-  val gpui_c_solidcraft_starting: String get() = Tr.s(4991)
-  val gpui_c_solidcraft_not_responding: String get() = Tr.s(4992)
-  val gpui_c_solidcraft_could_not_start: String get() = Tr.s(4993)
-  val gpui_c_solidcraft_could_not_start_prefix: String get() = Tr.s(4994)
-  val gpui_c_solidcraft_no_embed: String get() = Tr.s(4995)
-  val gpui_c_solidcraft_no_container: String get() = Tr.s(4996)
-  val gpui_c_solidcraft_own_window: String get() = Tr.s(4997)
-  val gpui_c_solidcraft_not_installed: String get() = Tr.s(4998)
-  val gpui_c_solidcraft_install_desc: String get() = Tr.s(4999)
-  val gpui_c_solidcraft_install_btn: String get() = Tr.s(5000)
-  val gpui_c_solidcraft_installing: String get() = Tr.s(5001)
-  val gpui_c_solidcraft_downloading: String get() = Tr.s(5002)
-  val gpui_c_solidcraft_closed: String get() = Tr.s(5003)
-  val gpui_c_solidcraft_open_btn: String get() = Tr.s(5004)
-  val gpui_c_solidcraft_window_err: String get() = Tr.s(5005)
-  val gpui_c_solidcraft_install_failed: String get() = Tr.s(5006)
-  val gpui_c_solidcraft_open: String get() = Tr.s(5007)
-  val gpui_c_solidcraft_new_part: String get() = Tr.s(5008)
-  val gpui_c_solidcraft_new_short: String get() = Tr.s(5009)
-  val gpui_c_solidcraft_popout_cmd: String get() = Tr.s(5010)
-  val gpui_f2_solidcraft_looking: String get() = Tr.s(5011)
-  fun gpui_f2_solidcraft_ok(v: Any, path: Any): String = Tr.f(5012, arrayOf<Any>(v, path))
-  fun gpui_f2_solidcraft_notfound(v: Any, n: Any, from: Any): String = Tr.f(5013, arrayOf<Any>(v, n, from))
-  fun gpui_f2_solidcraft_installing(v: Any, step: Any): String = Tr.f(5014, arrayOf<Any>(v, step))
-  fun gpui_f2_solidcraft_failed(why: Any): String = Tr.f(5015, arrayOf<Any>(why))
-  val gpui_f2_solidcraft_nopkg: String get() = Tr.s(5016)
-  fun gpui_f2_solidcraft_cli(v: Any, cli: Any): String = Tr.f(5017, arrayOf<Any>(v, cli))
-  fun gpui_f2_solidcraft_cli_nowin(v: Any, cli: Any): String = Tr.f(5018, arrayOf<Any>(v, cli))
-  val gpui_c_solidcraft_settings_ask: String get() = Tr.s(5019)
-  fun gpui_c_solidcraft_settings_installing(v: Any): String = Tr.f(5020, arrayOf<Any>(v))
-  val gpui_c_solidcraft_settings_folder_hint: String get() = Tr.s(5021)
-  val gpui_c_solidcraft_settings_notfound_dir: String get() = Tr.s(5022)
-  val gpui_c_solidcraft_settings_notfound: String get() = Tr.s(5023)
-  val gpui_c_solidcraft_settings_nopkg: String get() = Tr.s(5024)
-  fun gpui_c_solidcraft_settings_confirm(v: Any, n: Any, from: Any, folder: Any): String = Tr.f(5025, arrayOf<Any>(v, n, from, folder))
-  fun gpui_c_solidcraft_settings_offer(v: Any, from: Any): String = Tr.f(5026, arrayOf<Any>(v, from))
-  fun gpui_c_solidcraft_settings_downloading(done: Any, total: Any): String = Tr.f(5027, arrayOf<Any>(done, total))
-  val gpui_c_solidcraft_bring_back_cmd: String get() = Tr.s(5028)
-  val gpui_c_solidcraft_cli_only: String get() = Tr.s(5029)
-  val gpui_c_solidcraft_mech_hint: String get() = Tr.s(5030)
-  val solidcraft_web_open: String get() = Tr.s(5031)
-  val solidcraft_web_preview: String get() = Tr.s(5032)
-  val solidcraft_web_save: String get() = Tr.s(5033)
-  val solidcraft_web_saving: String get() = Tr.s(5034)
-  fun solidcraft_web_saved(name: Any): String = Tr.f(5035, arrayOf<Any>(name))
-  val solidcraft_web_install_btn: String get() = Tr.s(5036)
-  fun solidcraft_web_install_prompt(n: Any): String = Tr.f(5037, arrayOf<Any>(n))
-  fun solidcraft_web_installing(step: Any): String = Tr.f(5038, arrayOf<Any>(step))
-  val solidcraft_web_loading: String get() = Tr.s(5039)
-  fun solidcraft_web_stage_fetch(name: Any): String = Tr.f(5040, arrayOf<Any>(name))
-  val solidcraft_web_stage_engine: String get() = Tr.s(5041)
-  fun solidcraft_web_stage_wasm(pct: Any): String = Tr.f(5042, arrayOf<Any>(pct))
-  val solidcraft_web_stage_init: String get() = Tr.s(5043)
-  fun solidcraft_web_stage_open(name: Any): String = Tr.f(5044, arrayOf<Any>(name))
-  val solidcraft_web_copied: String get() = Tr.s(5045)
-  val solidcraft_web_not_installed: String get() = Tr.s(5046)
-  val solidcraft_web_readonly: String get() = Tr.s(5047)
-  val gpui_c_solidcraft_full_tip: String get() = Tr.s(5048)
-  val gpui_c_solidcraft_exit_full_tip: String get() = Tr.s(5049)
-  val gpui_c_solidcraft_full_cmd: String get() = Tr.s(5050)
-  val gpui_c_solidcraft_exit_full_cmd: String get() = Tr.s(5051)
-  val gpui_c_mech_view_native: String get() = Tr.s(5052)
-  val gpui_c_mech_view_native_tip: String get() = Tr.s(5053)
-  val gpui_c_mech_view_solidcraft_tip: String get() = Tr.s(5054)
-  val gpui_c_solidcraft_view_native: String get() = Tr.s(5055)
-  val gpui_c_solidcraft_native_always: String get() = Tr.s(5056)
-  val settings_cad_mech_tab: String get() = Tr.s(5057)
-  val settings_cad_mech_tab_note: String get() = Tr.s(5058)
-  val settings_cad_mech_solidcraft: String get() = Tr.s(5059)
-  val settings_cad_mech_backplane: String get() = Tr.s(5060)
+  val gpui_find_in_all_threads: String get() = Tr.s(1498)
+  val gpui_previous_match: String get() = Tr.s(1499)
+  val gpui_next_match: String get() = Tr.s(1500)
+  val gpui_back_to_the_thread: String get() = Tr.s(1501)
+  val gpui_no_steps_reported_yet: String get() = Tr.s(1502)
+  val gpui_unsent: String get() = Tr.s(1503)
+  val gpui_refused: String get() = Tr.s(1504)
+  val gpui_filter_projects_and_threads: String get() = Tr.s(1505)
+  val gpui_type_a_word_said_in2: String get() = Tr.s(1506)
+  val gpui_find_what_was_said_in: String get() = Tr.s(1507)
+  val gpui_find_in_this_thread_enter: String get() = Tr.s(1508)
+  fun gpui_google_bots(bots: Any): String = Tr.f(1509, arrayOf<Any>(bots))
+  val gpui_bots_none: String get() = Tr.s(1510)
+  val gpui_could_not_open_a_local: String get() = Tr.s(1511)
+  val gpui_paste_the_address_the_browser: String get() = Tr.s(1512)
+  val gpui_paste_the_address_the_browser2: String get() = Tr.s(1513)
+  val gpui_confirm_remove: String get() = Tr.s(1514)
+  val gpui_submit: String get() = Tr.s(1515)
+  val gpui_paste_a_pairing_link_pair: String get() = Tr.s(1516)
+  val gpui_hub_address_e_g_https: String get() = Tr.s(1517)
+  val gpui_on_the_hub_s_machine: String get() = Tr.s(1518)
+  val gpui_select_all: String get() = Tr.s(1519)
+  fun home_away(name: Any): String = Tr.f(1520, arrayOf<Any>(name))
+  fun home_away_since(name: Any, time: Any): String = Tr.f(1521, arrayOf<Any>(name, time))
+  fun home_away_queued(name: Any, n: Any): String = Tr.f(1522, arrayOf<Any>(name, n))
+  fun home_away_since_queued(name: Any, time: Any, n: Any): String = Tr.f(1523, arrayOf<Any>(name, time, n))
+  fun home_moving(to: Any): String = Tr.f(1524, arrayOf<Any>(to))
+  fun home_moving_step(to: Any, step: Any): String = Tr.f(1525, arrayOf<Any>(to, step))
+  val home_move_failed: String get() = Tr.s(1526)
+  fun home_move_failed_note(note: Any): String = Tr.f(1527, arrayOf<Any>(note))
+  val home_machine: String get() = Tr.s(1528)
+  val home_move_here: String get() = Tr.s(1529)
+  val gpui_settings_group_general: String get() = Tr.s(1530)
+  val gpui_settings_group_agents: String get() = Tr.s(1531)
+  val gpui_settings_group_workspace: String get() = Tr.s(1532)
+  val gpui_settings_group_connect: String get() = Tr.s(1533)
+  val gpui_settings_group_system: String get() = Tr.s(1534)
+  val gpui_settings_web_ui: String get() = Tr.s(1535)
+  val gpui_settings_shared_files: String get() = Tr.s(1536)
+  val gpui_settings_page_threads_git: String get() = Tr.s(1537)
+  val gpui_settings_git: String get() = Tr.s(1538)
+  val gpui_settings_network: String get() = Tr.s(1539)
+  val gpui_settings_mouse_board_each: String get() = Tr.s(1540)
+  val gpui_settings_mouse_solid_each: String get() = Tr.s(1541)
+  val gpui_settings_mouse_preset_note: String get() = Tr.s(1542)
+  val gpui_settings_every_device: String get() = Tr.s(1543)
+  val gpui_settings_advanced: String get() = Tr.s(1544)
+  val gpui_imp_could_not_keep_this_draft: String get() = Tr.s(1545)
+  val gpui_imp_describe_the_change: String get() = Tr.s(1546)
+  val gpui_imp_describe_the_behavior_in_detail: String get() = Tr.s(1547)
+  val gpui_imp_optional_reproduction_steps_or_other: String get() = Tr.s(1548)
+  val gpui_imp_the_public_issue_text: String get() = Tr.s(1549)
+  val gpui_imp_this_draft_was_already_opened: String get() = Tr.s(1550)
+  val gpui_imp_send_starts_a_new_backplane: String get() = Tr.s(1551)
+  val gpui_imp_review_the_issue_before_opening: String get() = Tr.s(1552)
+  val gpui_imp_the_hub_is_not_reachable: String get() = Tr.s(1553)
+  val gpui_imp_the_hub_could_not_accept: String get() = Tr.s(1554)
+  val gpui_imp_diagnostics_are_unavailable_uncheck_diagnostics: String get() = Tr.s(1555)
+  val gpui_imp_could_not_prepare_the_exact: String get() = Tr.s(1556)
+  val gpui_imp_this_report_is_too_long: String get() = Tr.s(1557)
+  val gpui_imp_review_the_exact_public_text: String get() = Tr.s(1558)
+  val gpui_imp_fill_the_unknown_fields_in: String get() = Tr.s(1559)
+  val gpui_imp_the_hub_did_not_confirm: String get() = Tr.s(1560)
+  val gpui_imp_the_hub_did_not_confirm2: String get() = Tr.s(1561)
+  val gpui_imp_report_agent_started_in_the: String get() = Tr.s(1562)
+  val gpui_imp_the_report_agent_is_still: String get() = Tr.s(1563)
+  val gpui_imp_no_complete_report_is_available: String get() = Tr.s(1564)
+  val gpui_imp_agent_report_loaded_edit_it: String get() = Tr.s(1565)
+  val gpui_imp_the_hub_did_not_confirm3: String get() = Tr.s(1566)
+  val gpui_imp_the_hub_did_not_confirm4: String get() = Tr.s(1567)
+  val gpui_imp_request_sent_opening_the_new: String get() = Tr.s(1568)
+  val gpui_imp_preparing_the_report: String get() = Tr.s(1569)
+  val gpui_imp_starting_the_report_agent: String get() = Tr.s(1570)
+  val gpui_imp_the_report_description_is_too: String get() = Tr.s(1571)
+  val gpui_imp_loading_the_agent_report: String get() = Tr.s(1572)
+  val gpui_imp_this_saved_request_belongs_to: String get() = Tr.s(1573)
+  val gpui_imp_creating_the_backplane_thread: String get() = Tr.s(1574)
+  val gpui_imp_uploading_the_screenshot: String get() = Tr.s(1575)
+  val gpui_imp_uploading_the_selected_recording: String get() = Tr.s(1576)
+  val gpui_imp_this_request_is_too_long: String get() = Tr.s(1577)
+  val gpui_imp_starting_the_request: String get() = Tr.s(1578)
+  val gpui_imp_attachments_need_a_hub_on: String get() = Tr.s(1579)
+  val gpui_imp_the_file_is_gone_choose: String get() = Tr.s(1580)
+  val gpui_imp_this_file_cannot_be_sent: String get() = Tr.s(1581)
+  val gpui_imp_the_image_did_not_arrive: String get() = Tr.s(1582)
+  val gpui_imp_the_file_changed_while_sending: String get() = Tr.s(1583)
+  val gpui_imp_the_image_did_not_arrive2: String get() = Tr.s(1584)
+  fun gpui_imp_why_choose_image(why: Any): String = Tr.f(1585, arrayOf<Any>(why))
+  val gpui_imp_this_window_cannot_be_captured: String get() = Tr.s(1586)
+  val gpui_imp_capturing: String get() = Tr.s(1587)
+  val gpui_imp_screenshot_captured_on_open: String get() = Tr.s(1588)
+  val gpui_imp_screenshot_refreshed: String get() = Tr.s(1589)
+  fun gpui_imp_e_draft_kept(e: Any): String = Tr.f(1590, arrayOf<Any>(e))
+  val gpui_imp_choose_a_png_jpeg_or: String get() = Tr.s(1591)
+  val gpui_imp_choose_an_image_up_to: String get() = Tr.s(1592)
+  val gpui_imp_could_not_keep_this_image: String get() = Tr.s(1593)
+  val gpui_imp_image_refreshed: String get() = Tr.s(1594)
+  val gpui_imp_this_window_cannot_be_recorded: String get() = Tr.s(1595)
+  fun gpui_imp_rec_start(max: Any): String = Tr.f(1596, arrayOf<Any>(max))
+  fun gpui_imp_rec_progress(secs: Any, max: Any, mib: Any): String = Tr.f(1597, arrayOf<Any>(secs, max, mib))
+  val gpui_imp_finishing_recording: String get() = Tr.s(1598)
+  val gpui_imp_could_not_keep_the_recording: String get() = Tr.s(1599)
+  val gpui_imp_recording_saved_locally_play_it: String get() = Tr.s(1600)
+  val gpui_imp_recording_canceled_your_draft_is: String get() = Tr.s(1601)
+  val gpui_imp_could_not_open_it_copy: String get() = Tr.s(1602)
+  val gpui_imp_no_folder_to_save_in: String get() = Tr.s(1603)
+  val gpui_imp_could_not_save_the_file: String get() = Tr.s(1604)
+  val gpui_imp_playing_the_recording_select_it: String get() = Tr.s(1605)
+  fun gpui_imp_saved(path: Any): String = Tr.f(1606, arrayOf<Any>(path))
+  val gpui_imp_exact_issue_text_copied: String get() = Tr.s(1607)
+  val gpui_imp_review_the_report_and_press: String get() = Tr.s(1608)
+  val gpui_imp_confirm_that_the_report_has: String get() = Tr.s(1609)
+  val gpui_imp_github_draft_opened_sign_in: String get() = Tr.s(1610)
+  val gpui_imp_stop_recording: String get() = Tr.s(1611)
+  val gpui_imp_cancel_recording: String get() = Tr.s(1612)
+  val gpui_imp_public_github_issue: String get() = Tr.s(1613)
+  val gpui_imp_internal_implementation_thread: String get() = Tr.s(1614)
+  val gpui_imp_what_would_you_like_to: String get() = Tr.s(1615)
+  val gpui_imp_backplane_source_project: String get() = Tr.s(1616)
+  val gpui_imp_public_on_backplaneworks_backplane_attributed: String get() = Tr.s(1617)
+  val gpui_imp_behavior_evidence: String get() = Tr.s(1618)
+  val gpui_imp_select_a_screenshot_manual_attachment: String get() = Tr.s(1619)
+  val gpui_imp_include_sanitized_diagnostics_in_the: String get() = Tr.s(1620)
+  val gpui_imp_include_additional_details_i_enter: String get() = Tr.s(1621)
+  val gpui_imp_additional_public_details: String get() = Tr.s(1622)
+  val gpui_imp_report_agent_project: String get() = Tr.s(1623)
+  val gpui_imp_write_report_with_agent: String get() = Tr.s(1624)
+  val gpui_imp_load_agent_report: String get() = Tr.s(1625)
+  val gpui_imp_open_report_writing_thread: String get() = Tr.s(1626)
+  val gpui_imp_use_report_template: String get() = Tr.s(1627)
+  val gpui_imp_editable_public_issue_body: String get() = Tr.s(1628)
+  val gpui_imp_copy_issue_text: String get() = Tr.s(1629)
+  val gpui_imp_save_report: String get() = Tr.s(1630)
+  val gpui_imp_save_selected_image: String get() = Tr.s(1631)
+  val gpui_imp_allow_another_github_draft: String get() = Tr.s(1632)
+  val gpui_imp_my_report_has_a_thorough: String get() = Tr.s(1633)
+  val gpui_imp_open_github_draft: String get() = Tr.s(1634)
+  val gpui_imp_capture_again: String get() = Tr.s(1635)
+  val gpui_imp_choose_image: String get() = Tr.s(1636)
+  val gpui_imp_record_screen: String get() = Tr.s(1637)
+  val gpui_imp_video_of_this_window_only: String get() = Tr.s(1638)
+  fun gpui_imp_rec_saved(secs: Any): String = Tr.f(1639, arrayOf<Any>(secs))
+  val gpui_imp_play_recording: String get() = Tr.s(1640)
+  val gpui_imp_discard_recording: String get() = Tr.s(1641)
+  val gpui_imp_select_this_recording_for_the: String get() = Tr.s(1642)
+  val gpui_imp_attach_this_recording_to_the: String get() = Tr.s(1643)
+  val gpui_imp_os_family_and_app_release: String get() = Tr.s(1644)
+  val gpui_imp_choose_an_image_or_preview: String get() = Tr.s(1645)
+  val gpui_imp_choose_the_backplane_source_project: String get() = Tr.s(1646)
+  val gpui_imp_changes_will_be_made_in: String get() = Tr.s(1647)
+  val gpui_imp_improvements: String get() = Tr.s(1648)
+  val gpui_imp_describe_the_change_to_backplane: String get() = Tr.s(1649)
+  val gpui_imp_choose_an_image_or_preview2: String get() = Tr.s(1650)
+  val gpui_imp_choose_the_backplane_source_project2: String get() = Tr.s(1651)
+  val gpui_imp_describe_the_issue_before_continuing: String get() = Tr.s(1652)
+  val gpui_imp_add_a_thorough_behavior_description: String get() = Tr.s(1653)
+  val gpui_imp_choose_a_project_for_the: String get() = Tr.s(1654)
+  val gpui_imp_review_issue: String get() = Tr.s(1655)
+  val gpui_imp_open_thread: String get() = Tr.s(1656)
+  val gpui_acct_connected: String get() = Tr.s(1657)
+  val gpui_acct_signing_in: String get() = Tr.s(1658)
+  val gpui_acct_not_checked: String get() = Tr.s(1659)
+  val gpui_acct_sign_in_expired: String get() = Tr.s(1660)
+  val gpui_acct_not_connected: String get() = Tr.s(1661)
+  fun gpui_acct_used(pct: Any, scope: Any): String = Tr.f(1662, arrayOf<Any>(pct, scope))
+  val gpui_acct_hour5: String get() = Tr.s(1663)
+  val gpui_acct_day7: String get() = Tr.s(1664)
+  val gpui_acct_default_account: String get() = Tr.s(1665)
+  val gpui_acct_cli_login: String get() = Tr.s(1666)
+  val gpui_acct_the_hub_is_not_reachable: String get() = Tr.s(1667)
+  val gpui_acct_paste_the_code_from_claude: String get() = Tr.s(1668)
+  val gpui_acct_the_hub_refused_that: String get() = Tr.s(1669)
+  fun gpui_acct_moved_already(n: Number): String = Tr.f(1670, arrayOf<Any>(n))
+  fun gpui_acct_moved(n: Number): String = Tr.f(1671, arrayOf<Any>(n))
+  fun gpui_acct_moved_running(n: Number): String = Tr.f(1672, arrayOf<Any>(n))
+  fun gpui_acct_moved_failed(n: Number): String = Tr.f(1673, arrayOf<Any>(n))
+  val gpui_acct_account_label_e_g_work: String get() = Tr.s(1674)
+  val gpui_acct_name_the_account_first_e: String get() = Tr.s(1675)
+  val gpui_acct_paste_the_code_claude_shows: String get() = Tr.s(1676)
+  val gpui_acct_generating_the_sign_in_link: String get() = Tr.s(1677)
+  val gpui_acct_open_the_link_sign_in: String get() = Tr.s(1678)
+  val gpui_acct_open_the_link_and_enter: String get() = Tr.s(1679)
+  val gpui_acct_submit_code: String get() = Tr.s(1680)
+  val gpui_acct_checking_the_code_and_your: String get() = Tr.s(1681)
+  val gpui_acct_cancel_sign_in: String get() = Tr.s(1682)
+  val gpui_acct_new_threads: String get() = Tr.s(1683)
+  val gpui_acct_use_for_new_threads: String get() = Tr.s(1684)
+  val gpui_acct_move_all_threads_here: String get() = Tr.s(1685)
+  val gpui_acct_check_sign_in: String get() = Tr.s(1686)
+  val gpui_acct_sign_in_again: String get() = Tr.s(1687)
+  val gpui_acct_confirm_delete: String get() = Tr.s(1688)
+  val gpui_acct_keep: String get() = Tr.s(1689)
+  val gpui_acct_each_account_is_a_separate: String get() = Tr.s(1690)
+  val gpui_acct_the_claude_cli_s_own: String get() = Tr.s(1691)
+  val gpui_acct_used_for_new_threads: String get() = Tr.s(1692)
+  val gpui_acct_available: String get() = Tr.s(1693)
+  val gpui_acct_add_claude_account: String get() = Tr.s(1694)
+  val gpui_acct_add_codex_account: String get() = Tr.s(1695)
+  val gpui_acct_manage_accounts_in_settings: String get() = Tr.s(1696)
+  val gpui_acct_weekly: String get() = Tr.s(1697)
+  val gpui_acct_weekly_opus: String get() = Tr.s(1698)
+  val gpui_acct_weekly_sonnet: String get() = Tr.s(1699)
+  val gpui_acct_now: String get() = Tr.s(1700)
+  fun gpui_acct_in_days(d: Any, h: Any): String = Tr.f(1701, arrayOf<Any>(d, h))
+  fun gpui_acct_in_hours(h: Any, m: Any): String = Tr.f(1702, arrayOf<Any>(h, m))
+  fun gpui_acct_in_minutes(m: Any): String = Tr.f(1703, arrayOf<Any>(m))
+  fun gpui_acct_left(window: Any, pct: Any): String = Tr.f(1704, arrayOf<Any>(window, pct))
+  val gpui_acct_resets_now: String get() = Tr.s(1705)
+  fun gpui_acct_resets(`when`: Any): String = Tr.f(1706, arrayOf<Any>(`when`))
+  val gpui_bots_webhook_name: String get() = Tr.s(1707)
+  fun gpui_bots_eg(label: Any, e: Any): String = Tr.f(1708, arrayOf<Any>(label, e))
+  val gpui_bots_no_tasks_yet_teach_this: String get() = Tr.s(1709)
+  fun gpui_bots_mem_range(from: Any, to: Any, total: Any): String = Tr.f(1710, arrayOf<Any>(from, to, total))
+  val gpui_bots_recall: String get() = Tr.s(1711)
+  val gpui_bots_recall_on: String get() = Tr.s(1712)
+  val gpui_bots_recall_off: String get() = Tr.s(1713)
+  fun gpui_bots_recall_stats(messages: Any, lines: Any, left: Any): String = Tr.f(1714, arrayOf<Any>(messages, lines, left))
+  val gpui_bots_recall_note: String get() = Tr.s(1715)
+  fun gpui_bots_recall_mem_line(pct: Any, view: Any, max: Any): String = Tr.f(1716, arrayOf<Any>(pct, view, max))
+  fun gpui_bots_recall_mem_short(pct: Any): String = Tr.f(1717, arrayOf<Any>(pct))
+  fun gpui_bots_recall_mem_lines(done: Any, total: Any): String = Tr.f(1718, arrayOf<Any>(done, total))
+  val gpui_bots_recall_mem_caught: String get() = Tr.s(1719)
+  fun gpui_bots_recall_mem_behind(n: Number): String = Tr.f(1720, arrayOf<Any>(n))
+  fun gpui_bots_recall_mem_merge(n: Number): String = Tr.f(1721, arrayOf<Any>(n))
+  fun gpui_bots_recall_mem_held(time: Any): String = Tr.f(1722, arrayOf<Any>(time))
+  fun gpui_bots_recall_mem_size(view: Any, max: Any): String = Tr.f(1723, arrayOf<Any>(view, max))
+  fun gpui_bots_recall_mem_cut(view: Any, max: Any): String = Tr.f(1724, arrayOf<Any>(view, max))
+  val gpui_bots_newer: String get() = Tr.s(1725)
+  fun gpui_bots_mem_older(more: Any): String = Tr.f(1726, arrayOf<Any>(more))
+  val gpui_bots_when_hint: String get() = Tr.s(1727)
+  val gpui_bots_nothing_to_report: String get() = Tr.s(1728)
+  val gpui_bots_no_mail: String get() = Tr.s(1729)
+  fun gpui_bots_mail_older(n: Number): String = Tr.f(1730, arrayOf<Any>(n))
+  val gpui_bots_this_space_is_a_web: String get() = Tr.s(1731)
+  val gpui_bots_no_space_yet_the_bot: String get() = Tr.s(1732)
+  val gpui_bots_created: String get() = Tr.s(1733)
+  val gpui_bots_the_hub_refused_it: String get() = Tr.s(1734)
+  val gpui_bots_webhook_made_keep_its_secret: String get() = Tr.s(1735)
+  val gpui_bots_path: String get() = Tr.s(1736)
+  val gpui_bots_token_off: String get() = Tr.s(1737)
+  val gpui_bots_no_hooks: String get() = Tr.s(1738)
+  fun gpui_bots_hook_calls(n: Number): String = Tr.f(1739, arrayOf<Any>(n))
+  val gpui_bots_no_token: String get() = Tr.s(1740)
+  val gpui_bots_no_messages_yet: String get() = Tr.s(1741)
+  val gpui_bots_keep_room: String get() = Tr.s(1742)
+  val gpui_bots_room_closed: String get() = Tr.s(1743)
+  val gpui_bots_connecting_to_the_bot_s: String get() = Tr.s(1744)
+  fun gpui_bots_page_notyet(page: Any): String = Tr.f(1745, arrayOf<Any>(page))
+  val gpui_bots_no_routines: String get() = Tr.s(1746)
+  val gpui_imp_send_to_project: String get() = Tr.s(1747)
+  val gpui_imp_search_projects: String get() = Tr.s(1748)
+  val gpui_imp_choose_a_project_before_sending: String get() = Tr.s(1749)
+  val gpui_imp_choose_a_project_then_retry: String get() = Tr.s(1750)
+  val gpui_imp_the_thread_runs_on_the: String get() = Tr.s(1751)
+  val gpui_imp_ctrl_enter_sends_this_request: String get() = Tr.s(1752)
+  val gpui_imp_send_starts_a_new_thread: String get() = Tr.s(1753)
+  val gpui_imp_creating_the_thread: String get() = Tr.s(1754)
+  val gpui_imp_request_sent_opening_the_new2: String get() = Tr.s(1755)
+  fun gpui_imp_project_chosen(title: Any): String = Tr.f(1756, arrayOf<Any>(title))
+  val gpui_acct_sync_token: String get() = Tr.s(1757)
+  val gpui_acct_sync_token_from_a_linked: String get() = Tr.s(1758)
+  fun gpui_acct_sync_days(n: Number): String = Tr.f(1759, arrayOf<Any>(n))
+  val gpui_acct_renew_the_sync_token: String get() = Tr.s(1760)
+  val gpui_acct_make_a_sync_token: String get() = Tr.s(1761)
+  val gpui_acct_make_the_sync_token: String get() = Tr.s(1762)
+  val gpui_acct_add_claude_sync: String get() = Tr.s(1763)
+  val gpui_acct_signed_out: String get() = Tr.s(1764)
+  val gpui_acct_can_t_tell_who_is: String get() = Tr.s(1765)
+  val gpui_acct_also_added_as: String get() = Tr.s(1766)
+  val gpui_acct_the_same_account_counted_once: String get() = Tr.s(1767)
+  val gpui_acct_claude_code_is_signed_in: String get() = Tr.s(1768)
+  val gpui_acct_codex_is_signed_in_with: String get() = Tr.s(1769)
+  val gpui_acct_codex_did_not_say_who: String get() = Tr.s(1770)
+  val gpui_acct_claude_code_did_not_say: String get() = Tr.s(1771)
+  val gpui_acct_anthropic_api_key_is_set: String get() = Tr.s(1772)
+  val gpui_acct_the_cli_is_signed_in: String get() = Tr.s(1773)
+  val gpui_bots_name_rule: String get() = Tr.s(1774)
+  val gpui_acct_open_the_link_and_sign: String get() = Tr.s(1775)
+  fun bots_delete_removes(name: Any): String = Tr.f(1776, arrayOf<Any>(name))
+  val bots_settings_head: String get() = Tr.s(1777)
+  val gpui_send_the_message: String get() = Tr.s(1778)
+  val gpui_new_line_in_the_message: String get() = Tr.s(1779)
+  val gpui_send_also: String get() = Tr.s(1780)
+  val gpui_put_the_keyboard_in_the: String get() = Tr.s(1781)
+  val gpui_put_the_keyboard_in_the2: String get() = Tr.s(1782)
+  val gpui_agent_model_and_effort: String get() = Tr.s(1783)
+  val gpui_account_of_this_thread_with: String get() = Tr.s(1784)
+  val gpui_pick_account_n_in: String get() = Tr.s(1785)
+  val gpui_previous_row_wraps_round_and: String get() = Tr.s(1786)
+  val gpui_next_row_wraps_round_and: String get() = Tr.s(1787)
+  val gpui_less_effort_or_the_caret: String get() = Tr.s(1788)
+  val gpui_more_effort_or_the_caret: String get() = Tr.s(1789)
+  val gpui_next_column_provider_model_effort: String get() = Tr.s(1790)
+  val gpui_previous_column: String get() = Tr.s(1791)
+  val gpui_take_the_highlighted_row: String get() = Tr.s(1792)
+  val gpui_close_a_popup_dialog_or: String get() = Tr.s(1793)
+  val gpui_commands_jump_to_a_thread: String get() = Tr.s(1794)
+  val gpui_commands_also: String get() = Tr.s(1795)
+  val gpui_fold_or_unfold_the_sidebar: String get() = Tr.s(1796)
+  val gpui_go_to_project_n: String get() = Tr.s(1797)
+  val gpui_go_to_thread_n: String get() = Tr.s(1798)
+  val gpui_previous_thread: String get() = Tr.s(1799)
+  val gpui_next_thread: String get() = Tr.s(1800)
+  val gpui_uberbot_chat: String get() = Tr.s(1801)
+  val gpui_settle_or_unsettle_the_thread: String get() = Tr.s(1802)
+  val gpui_rename_the_open_thread: String get() = Tr.s(1803)
+  val gpui_larger_text: String get() = Tr.s(1804)
+  val gpui_smaller_text: String get() = Tr.s(1805)
+  val gpui_text_size_back_to_normal: String get() = Tr.s(1806)
+  val gpui_stop_the_running_turn: String get() = Tr.s(1807)
+  val gpui_layer_focus_the_other_layers: String get() = Tr.s(1808)
+  val gpui_undo_the_last_stroke_or: String get() = Tr.s(1809)
+  val gpui_delete_the_selection_or_clear: String get() = Tr.s(1810)
+  val gpui_delete_also: String get() = Tr.s(1811)
+  val gpui_show_or_hide_the_floating: String get() = Tr.s(1812)
+  val gpui_show_the_floating_terminal_also: String get() = Tr.s(1813)
+  val gpui_show_or_hide_the_floating2: String get() = Tr.s(1814)
+  val gpui_leave_the_terminal_put_it: String get() = Tr.s(1815)
+  val gpui_copy_the_terminal_s_selection: String get() = Tr.s(1816)
+  val gpui_paste_into_the_terminal: String get() = Tr.s(1817)
+  val gpui_rail_views_b_board_s: String get() = Tr.s(1818)
+  val gpui_performance_overlay_the_last_few: String get() = Tr.s(1819)
+  val gpui_composer: String get() = Tr.s(1820)
+  val gpui_model_menu_and_popups: String get() = Tr.s(1821)
+  val gpui_model_menu: String get() = Tr.s(1822)
+  val gpui_dialogs: String get() = Tr.s(1823)
+  val gpui_palette: String get() = Tr.s(1824)
+  val gpui_timeline: String get() = Tr.s(1825)
+  val gpui_drawing_pad: String get() = Tr.s(1826)
+  val gpui_window: String get() = Tr.s(1827)
+  val gpui_prev_next_thread: String get() = Tr.s(1828)
+  val gpui_new_thread_here: String get() = Tr.s(1829)
+  val gpui_jump_to_a_thread_here: String get() = Tr.s(1830)
+  val gpui_write_a_message: String get() = Tr.s(1831)
+  val gpui_all_shortcuts: String get() = Tr.s(1832)
+  val gpui_bring_it_into_view: String get() = Tr.s(1833)
+  val gpui_draw_a_sketch_and_attach: String get() = Tr.s(1834)
+  val gpui_fold_the_sidebar: String get() = Tr.s(1835)
+  val gpui_go_to_the_newest_message: String get() = Tr.s(1836)
+  val gpui_jump_or_run_a_command: String get() = Tr.s(1837)
+  val gpui_layers_others_as_they_are: String get() = Tr.s(1838)
+  val gpui_this_thread_orders_the_project: String get() = Tr.s(1839)
+  val gpui_tokens_cost_and_context_the: String get() = Tr.s(1840)
+  val gpui_commands: String get() = Tr.s(1841)
+  val gpui_newer: String get() = Tr.s(1842)
+  val viewer_gerbers_older_board: String get() = Tr.s(1843)
+  val gpui_older: String get() = Tr.s(1844)
+  fun gpui_b_replying_to(line: Any): String = Tr.f(1845, arrayOf<Any>(line))
+  fun gpui_b_in_reply_to(quote: Any): String = Tr.f(1846, arrayOf<Any>(quote))
+  fun gpui_b_settled_shelf(n: Number): String = Tr.f(1847, arrayOf<Any>(n))
+  fun gpui_b_settled_active(n: Number): String = Tr.f(1848, arrayOf<Any>(n))
+  fun gpui_b_history_count(n: Number): String = Tr.f(1849, arrayOf<Any>(n))
+  fun gpui_b_older(n: Number): String = Tr.f(1850, arrayOf<Any>(n))
+  fun gpui_b_older_open(n: Number): String = Tr.f(1851, arrayOf<Any>(n))
+  val gpui_start_a_conversation: String get() = Tr.s(1852)
+  val gpui_order: String get() = Tr.s(1853)
+  val gpui_improvements: String get() = Tr.s(1854)
+  val gpui_nothing_reported_by_the_provider: String get() = Tr.s(1855)
+  fun gpui_b_held_now(held: Any): String = Tr.f(1856, arrayOf<Any>(held))
+  fun gpui_b_on_machine(machine: Any): String = Tr.f(1857, arrayOf<Any>(machine))
+  fun gpui_b_window_on_machine(machine: Any): String = Tr.f(1858, arrayOf<Any>(machine))
+  val gpui_or: String get() = Tr.s(1859)
+  val gpui_bot: String get() = Tr.s(1860)
+  val gpui_thread: String get() = Tr.s(1861)
+  val gpui_project: String get() = Tr.s(1862)
+  val gpui_room: String get() = Tr.s(1863)
+  val gpui_model: String get() = Tr.s(1864)
+  val gpui_before_the_agent_s_edits: String get() = Tr.s(1865)
+  fun gpui_of_changes(count: Number, total: Number): String = Tr.f(1866, arrayOf<Any>(count, total))
+  fun gpui_b_live_changes(count: Number): String = Tr.f(1867, arrayOf<Any>(count))
+  fun gpui_b_steps_count(n: Number): String = Tr.f(1868, arrayOf<Any>(n))
+  val gpui_branch_point: String get() = Tr.s(1869)
+  val gpui_design_change: String get() = Tr.s(1870)
+  val gpui_show_the_old_version: String get() = Tr.s(1871)
+  val gpui_show_the_diff_version: String get() = Tr.s(1872)
+  val gpui_show_the_new_version: String get() = Tr.s(1873)
+  val gpui_loading_the_history: String get() = Tr.s(1874)
+  val gpui_loading_versions: String get() = Tr.s(1875)
+  val gpui_no_versions_in_this_project: String get() = Tr.s(1876)
+  val gpui_no_commit_branch_or_tag: String get() = Tr.s(1877)
+  val gpui_that_version_has_no_copy: String get() = Tr.s(1878)
+  val gpui_this_version_of_the_file: String get() = Tr.s(1879)
+  fun gpui_b_hist_file_missing(name: Any): String = Tr.f(1880, arrayOf<Any>(name))
+  val gpui_the_design_history_could_not: String get() = Tr.s(1881)
+  fun gpui_b_hist_tip_of(n: Number, c: Number, total: Number): String = Tr.f(1882, arrayOf<Any>(n, c, total))
+  fun gpui_b_hist_tip_all(n: Number, c: Number): String = Tr.f(1883, arrayOf<Any>(n, c))
+  fun gpui_b_hist_tip_of_before(n: Number, c: Number, total: Number, before: Number): String = Tr.f(1884, arrayOf<Any>(n, c, total, before))
+  fun gpui_b_hist_tip_all_before(n: Number, c: Number, before: Number): String = Tr.f(1885, arrayOf<Any>(n, c, before))
+  val gpui_download_as_zip: String get() = Tr.s(1886)
+  val gpui_b_files_new: String get() = Tr.s(1887)
+  val gpui_upload: String get() = Tr.s(1888)
+  val gpui_zip: String get() = Tr.s(1889)
+  val gpui_folder_created: String get() = Tr.s(1890)
+  val gpui_renamed: String get() = Tr.s(1891)
+  val gpui_deleted: String get() = Tr.s(1892)
+  val gpui_uploaded: String get() = Tr.s(1893)
+  val gpui_the_hub_refused: String get() = Tr.s(1894)
+  val gpui_a_folder_name_is_one: String get() = Tr.s(1895)
+  val gpui_a_name_is_one_plain: String get() = Tr.s(1896)
+  fun gpui_b_files_no_preview(name: Any): String = Tr.f(1897, arrayOf<Any>(name))
+  fun gpui_b_files_copied(path: Any): String = Tr.f(1898, arrayOf<Any>(path))
+  val gpui_no_hub_address_to_download: String get() = Tr.s(1899)
+  val gpui_this_entry_cannot_be_downloaded: String get() = Tr.s(1900)
+  fun gpui_b_files_downloading(file: Any): String = Tr.f(1901, arrayOf<Any>(file))
+  fun gpui_b_files_saved(path: Any, n: Number): String = Tr.f(1902, arrayOf<Any>(path, n))
+  fun gpui_b_files_download_failed(why: Any): String = Tr.f(1903, arrayOf<Any>(why))
+  fun gpui_b_files_uploading(n: Number): String = Tr.f(1904, arrayOf<Any>(n))
+  fun gpui_b_files_odd_name(name: Any): String = Tr.f(1905, arrayOf<Any>(name))
+  fun gpui_b_files_not_a_file(name: Any): String = Tr.f(1906, arrayOf<Any>(name))
+  fun gpui_b_files_too_big(name: Any): String = Tr.f(1907, arrayOf<Any>(name))
+  fun gpui_b_files_items(n: Number): String = Tr.f(1908, arrayOf<Any>(n))
+  fun gpui_b_files_of(shown: Number, n: Number): String = Tr.f(1909, arrayOf<Any>(shown, n))
+  val gpui_new_folder: String get() = Tr.s(1910)
+  val gpui_rename_to: String get() = Tr.s(1911)
+  fun gpui_b_files_delete_ask(path: Any): String = Tr.f(1912, arrayOf<Any>(path))
+  val gpui_keep: String get() = Tr.s(1913)
+  fun gpui_b_files_more(n: Number): String = Tr.f(1914, arrayOf<Any>(n))
+  val gpui_empty_folder_drop_files_here: String get() = Tr.s(1915)
+  val gpui_nothing_matches: String get() = Tr.s(1916)
+  val gpui_could_not_load_the_file: String get() = Tr.s(1917)
+  val gpui_drawing_the_page: String get() = Tr.s(1918)
+  val gpui_filter_this_folder: String get() = Tr.s(1919)
+  val gpui_no_hub_address: String get() = Tr.s(1920)
+  val gpui_not_a_hub_path: String get() = Tr.s(1921)
+  val gpui_the_hub_gave_no_answer: String get() = Tr.s(1922)
+  fun gpui_the_hub_answered(status: Any): String = Tr.f(1923, arrayOf<Any>(status))
+  val gpui_fold_the_project_s_threads: String get() = Tr.s(1924)
+  val gpui_unfold_the_project_s_threads: String get() = Tr.s(1925)
+  val gpui_open_in_kicad_embedded: String get() = Tr.s(1926)
+  val gpui_that_file_does_not_open: String get() = Tr.s(1927)
+  val gpui_open_a_thread_first_that: String get() = Tr.s(1928)
+  val gpui_gerbers_open_on_their_project: String get() = Tr.s(1929)
+  val gpui_that_kicad_project_has_no: String get() = Tr.s(1930)
+  val gpui_that_file_is_not_on: String get() = Tr.s(1931)
+  val gpui_quit_backplane: String get() = Tr.s(1932)
+  val gpui_quit_backplane_on_a_mac: String get() = Tr.s(1933)
+  val gpui_hide_backplane: String get() = Tr.s(1934)
+  val gpui_hide_others: String get() = Tr.s(1935)
+  val gpui_show_all: String get() = Tr.s(1936)
+  val gpui_close_window: String get() = Tr.s(1937)
+  val gpui_close_the_window_on_a: String get() = Tr.s(1938)
+  val gpui_hide_backplane_on_a_mac: String get() = Tr.s(1939)
+  fun gpui_dl_percent(name: Any, pct: Any): String = Tr.f(1940, arrayOf<Any>(name, pct))
+  fun gpui_dl_mb(name: Any, mb: Any): String = Tr.f(1941, arrayOf<Any>(name, mb))
+  fun gpui_dl_saved(name: Any): String = Tr.f(1942, arrayOf<Any>(name))
+  fun gpui_dl_failed(name: Any, why: Any): String = Tr.f(1943, arrayOf<Any>(name, why))
+  val gpui_dl_manufacturing: String get() = Tr.s(1944)
+  val gpui_dl_the_download_ended_early: String get() = Tr.s(1945)
+  val gpui_dl_the_hub_closed_the_connection: String get() = Tr.s(1946)
+  val gpui_dl_that_file_is_not_there: String get() = Tr.s(1947)
+  val gpui_dl_the_hub_does_not_share: String get() = Tr.s(1948)
+  val gpui_dl_the_hub_kept_changing_the: String get() = Tr.s(1949)
+  val gpui_dl_the_hub_sent_the_file: String get() = Tr.s(1950)
+  val gpui_c_commit: String get() = Tr.s(1951)
+  val gpui_c_diff_cut: String get() = Tr.s(1952)
+  val gpui_c_loading_board: String get() = Tr.s(1953)
+  val gpui_c_loading_schematic: String get() = Tr.s(1954)
+  val gpui_c_loading_gerbers: String get() = Tr.s(1955)
+  val gpui_c_opening: String get() = Tr.s(1956)
+  val gpui_c_open_it: String get() = Tr.s(1957)
+  val gpui_c_bring_into_view: String get() = Tr.s(1958)
+  val gpui_c_browser_needs_hub: String get() = Tr.s(1959)
+  val gpui_c_piece: String get() = Tr.s(1960)
+  fun gpui_c_kicad_open_on(machine: Any): String = Tr.f(1961, arrayOf<Any>(machine))
+  val gpui_c_altium_open: String get() = Tr.s(1962)
+  val gpui_c_altium_open_tip: String get() = Tr.s(1963)
+  fun gpui_c_sheets_count(n: Any): String = Tr.f(1964, arrayOf<Any>(n))
+  fun gpui_c_probe_on_top(ref: Any): String = Tr.f(1965, arrayOf<Any>(ref))
+  fun gpui_c_probe_on_sheet(ref: Any, sheet: Any): String = Tr.f(1966, arrayOf<Any>(ref, sheet))
+  fun gpui_c_split_hide(name: Any): String = Tr.f(1967, arrayOf<Any>(name))
+  fun gpui_c_split_show(name: Any): String = Tr.f(1968, arrayOf<Any>(name))
+  fun gpui_c_dl_saved(file: Any, folder: Any): String = Tr.f(1969, arrayOf<Any>(file, folder))
+  fun gpui_c_dl_notsaved(name: Any, error: Any): String = Tr.f(1970, arrayOf<Any>(name, error))
+  fun gpui_c_dl_hub(name: Any, status: Any): String = Tr.f(1971, arrayOf<Any>(name, status))
+  fun gpui_c_dl_failed(name: Any, error: Any): String = Tr.f(1972, arrayOf<Any>(name, error))
+  val gpui_c_dl_nofile: String get() = Tr.s(1973)
+  fun gpui_c_dl_busy(name: Any): String = Tr.f(1974, arrayOf<Any>(name))
+  val gpui_c_br_notjpeg: String get() = Tr.s(1975)
+  val gpui_c_br_opening: String get() = Tr.s(1976)
+  fun gpui_c_br_hub_answered(code: Any): String = Tr.f(1977, arrayOf<Any>(code))
+  fun gpui_c_br_hub_unreachable(error: Any): String = Tr.f(1978, arrayOf<Any>(error))
+  val gpui_c_br_https: String get() = Tr.s(1979)
+  val gpui_c_br_waiting: String get() = Tr.s(1980)
+  fun gpui_c_br_cef_note(error: Any): String = Tr.f(1981, arrayOf<Any>(error))
+  fun gpui_c_br_cef_banner(error: Any): String = Tr.f(1982, arrayOf<Any>(error))
+  val gpui_c_br_nohelper: String get() = Tr.s(1983)
+  val gpui_c_br_nochrome: String get() = Tr.s(1984)
+  val gpui_c_br_retry_hint: String get() = Tr.s(1985)
+  fun gpui_c_br_couldnot(error: Any): String = Tr.f(1986, arrayOf<Any>(error))
+  val gpui_c_br_slow: String get() = Tr.s(1987)
+  val gpui_c_br_slow_hint: String get() = Tr.s(1988)
+  val gpui_c_br_starting: String get() = Tr.s(1989)
+  val gpui_c_br_newtab: String get() = Tr.s(1990)
+  val gpui_c_br_address: String get() = Tr.s(1991)
+  val gpui_c_solid_bad_model: String get() = Tr.s(1992)
+  val gpui_c_solid_incomplete_model: String get() = Tr.s(1993)
+  val gpui_c_solid_unexpected_model: String get() = Tr.s(1994)
+  val gpui_c_solid_bad_part: String get() = Tr.s(1995)
+  val gpui_c_solid_bad_place: String get() = Tr.s(1996)
+  val gpui_c_solid_too_many: String get() = Tr.s(1997)
+  val gpui_c_solid_incomplete_part: String get() = Tr.s(1998)
+  val gpui_c_solid_unexpected_part: String get() = Tr.s(1999)
+  val gpui_c_solid_part_nomodel: String get() = Tr.s(2000)
+  val gpui_c_solid_no_count: String get() = Tr.s(2001)
+  val gpui_c_solid_drawing: String get() = Tr.s(2002)
+  val gpui_c_solid_building: String get() = Tr.s(2003)
+  fun gpui_c_solid_parts(done: Any, of: Any): String = Tr.f(2004, arrayOf<Any>(done, of))
+  val gpui_c_solid_none: String get() = Tr.s(2005)
+  fun gpui_c_solid_previous(why: Any): String = Tr.f(2006, arrayOf<Any>(why))
+  fun gpui_c_solid_saved(path: Any): String = Tr.f(2007, arrayOf<Any>(path))
+  fun gpui_c_solid_snap_failed(error: Any): String = Tr.f(2008, arrayOf<Any>(error))
+  fun gpui_c_secs(secs: Any): String = Tr.f(2009, arrayOf<Any>(secs))
+  fun gpui_c_about_secs(secs: Any): String = Tr.f(2010, arrayOf<Any>(secs))
+  val viewer_c_view_iso: String get() = Tr.s(2011)
+  val viewer_c_view_top: String get() = Tr.s(2012)
+  val viewer_c_view_bottom: String get() = Tr.s(2013)
+  val viewer_c_view_front: String get() = Tr.s(2014)
+  val viewer_c_view_right: String get() = Tr.s(2015)
+  val viewer_c_view_back: String get() = Tr.s(2016)
+  val viewer_c_view_left: String get() = Tr.s(2017)
+  val viewer_c_view_snap: String get() = Tr.s(2018)
+  val gpui_c_term_running: String get() = Tr.s(2019)
+  val gpui_c_term_stopped: String get() = Tr.s(2020)
+  val gpui_c_term_failed: String get() = Tr.s(2021)
+  fun gpui_c_term_done(code: Any): String = Tr.f(2022, arrayOf<Any>(code))
+  fun gpui_c_term_exited(code: Any): String = Tr.f(2023, arrayOf<Any>(code))
+  val gpui_c_term_nothread: String get() = Tr.s(2024)
+  val gpui_c_term_esc: String get() = Tr.s(2025)
+  fun gpui_c_term_inpanel(state: Any): String = Tr.f(2026, arrayOf<Any>(state))
+  val gpui_c_term_again: String get() = Tr.s(2027)
+  val gpui_c_term_collapse: String get() = Tr.s(2028)
+  val gpui_c_term_expand: String get() = Tr.s(2029)
+  val gpui_c_term_pop: String get() = Tr.s(2030)
+  fun gpui_c_term_hint(hide: Any, copy: Any, paste: Any): String = Tr.f(2031, arrayOf<Any>(hide, copy, paste))
+  fun gpui_c_term_back(n: Number): String = Tr.f(2032, arrayOf<Any>(n))
+  val gpui_c_term_run: String get() = Tr.s(2033)
+  val gpui_c_term_busy: String get() = Tr.s(2034)
+  fun gpui_c_cef_downloading(name: Any): String = Tr.f(2035, arrayOf<Any>(name))
+  fun gpui_c_cef_downloaded(name: Any, folder: Any): String = Tr.f(2036, arrayOf<Any>(name, folder))
+  fun gpui_c_cef_stopped(name: Any): String = Tr.f(2037, arrayOf<Any>(name))
+  fun gpui_c_cef_percent(name: Any, percent: Any): String = Tr.f(2038, arrayOf<Any>(name, percent))
+  val gpui_c_cef_refused: String get() = Tr.s(2039)
+  val gpui_c_layers_tip: String get() = Tr.s(2040)
+  val gpui_c_boards_find_ph: String get() = Tr.s(2041)
+  val gpui_c_boards_select: String get() = Tr.s(2042)
+  val gpui_c_boards_find: String get() = Tr.s(2043)
+  fun gpui_c_boards_folder(folder: Any): String = Tr.f(2044, arrayOf<Any>(folder))
+  val gpui_c_boards_default: String get() = Tr.s(2045)
+  val gpui_c_boards_none: String get() = Tr.s(2046)
+  val gpui_c_cap_badffmpeg: String get() = Tr.s(2047)
+  val gpui_c_cap_noffmpeg: String get() = Tr.s(2048)
+  val gpui_c_cap_nox11: String get() = Tr.s(2049)
+  val gpui_c_cap_nostart: String get() = Tr.s(2050)
+  val gpui_c_cap_failed: String get() = Tr.s(2051)
+  val gpui_c_cap_recfailed: String get() = Tr.s(2052)
+  val gpui_c_image_close: String get() = Tr.s(2053)
+  fun gpui_c_image_size(w: Any, h: Any): String = Tr.f(2054, arrayOf<Any>(w, h))
+  val gpui_c_image_fit: String get() = Tr.s(2055)
+  val gpui_c_image_loading_full: String get() = Tr.s(2056)
+  val gpui_c_image_full_failed: String get() = Tr.s(2057)
+  fun gpui_c_image_saved(path: Any): String = Tr.f(2058, arrayOf<Any>(path))
+  val gpui_c_image_err_nohub: String get() = Tr.s(2059)
+  val gpui_c_image_err_unsent: String get() = Tr.s(2060)
+  fun gpui_c_image_save_failed(why: Any): String = Tr.f(2061, arrayOf<Any>(why))
+  fun gpui_c_plot_toobig(mb: Any): String = Tr.f(2062, arrayOf<Any>(mb))
+  val gpui_c_plot_unread: String get() = Tr.s(2063)
+  val gpui_c_plot_badref: String get() = Tr.s(2064)
+  fun gpui_c_md_more(n: Number): String = Tr.f(2065, arrayOf<Any>(n))
+  fun gpui_c_pad_hint_pen(delete: Any, undo: Any): String = Tr.f(2066, arrayOf<Any>(delete, undo))
+  fun gpui_c_pad_hint_box(delete: Any, undo: Any): String = Tr.f(2067, arrayOf<Any>(delete, undo))
+  fun gpui_c_pad_hint_eraser(undo: Any): String = Tr.f(2068, arrayOf<Any>(undo))
+  val gpui_c_pad_pen: String get() = Tr.s(2069)
+  val gpui_c_pad_box: String get() = Tr.s(2070)
+  val gpui_c_pad_eraser: String get() = Tr.s(2071)
+  val gpui_c_kicad_kicad_could_not_start: String get() = Tr.s(2072)
+  val gpui_c_kicad_try_again: String get() = Tr.s(2073)
+  val gpui_c_kicad_open_anyway: String get() = Tr.s(2074)
+  val gpui_c_kicad_cancel: String get() = Tr.s(2075)
+  val gpui_c_kicad_open_the_app_instead: String get() = Tr.s(2076)
+  val gpui_c_kicad_mac_full_screen: String get() = Tr.s(2077)
+  val gpui_c_kicad_mac_prompt: String get() = Tr.s(2078)
+  val gpui_c_kicad_mac_buried: String get() = Tr.s(2079)
+  val gpui_c_kicad_recover_prompt: String get() = Tr.s(2080)
+  val gpui_c_kicad_stock_tip: String get() = Tr.s(2081)
+  val gpui_c_kicad_kicad_is_not_responding: String get() = Tr.s(2082)
+  val gpui_c_kicad_kicad_was_closed: String get() = Tr.s(2083)
+  val gpui_c_kicad_closed_kept: String get() = Tr.s(2084)
+  val gpui_c_kicad_closed_lost: String get() = Tr.s(2085)
+  val gpui_c_kicad_closed_agent: String get() = Tr.s(2086)
+  val gpui_c_kicad_open_again: String get() = Tr.s(2087)
+  val gpui_c_kicad_starting_kicad: String get() = Tr.s(2088)
+  fun gpui_c_kicad_starting_slow(what: Any, secs: Any): String = Tr.f(2089, arrayOf<Any>(what, secs))
+  fun gpui_c_kicad_lock_ask(file: Any, holder: Any): String = Tr.f(2090, arrayOf<Any>(file, holder))
+  val gpui_c_kicad_phase_handover: String get() = Tr.s(2091)
+  val gpui_c_kicad_phase_none: String get() = Tr.s(2092)
+  val gpui_c_kicad_phase_spawned: String get() = Tr.s(2093)
+  val gpui_c_kicad_phase_socket: String get() = Tr.s(2094)
+  val gpui_c_kicad_phase_answering: String get() = Tr.s(2095)
+  val gpui_c_kicad_phase_show: String get() = Tr.s(2096)
+  fun gpui_c_kicad_task_wait(what: Any): String = Tr.f(2097, arrayOf<Any>(what))
+  fun gpui_c_kicad_notice(what: Any): String = Tr.f(2098, arrayOf<Any>(what))
+  fun gpui_c_kicad_firstshow(editor: Any, why: Any): String = Tr.f(2099, arrayOf<Any>(editor, why))
+  val gpui_c_kicad_this_window_cannot_hold_another: String get() = Tr.s(2100)
+  val gpui_c_kicad_no_x11_connection: String get() = Tr.s(2101)
+  val gpui_c_kicad_could_not_create_container: String get() = Tr.s(2102)
+  val gpui_c_kicad_the_embedded_editor_needs_backplane: String get() = Tr.s(2103)
+  val gpui_c_kicad_back_to_backplane_s_viewer: String get() = Tr.s(2104)
+  val gpui_c_kicad_edit_in_the_real_kicad: String get() = Tr.s(2105)
+  val gpui_c_kicad_view: String get() = Tr.s(2106)
+  val gpui_c_kicad_symbols: String get() = Tr.s(2107)
+  val gpui_c_kicad_footprints: String get() = Tr.s(2108)
+  val gpui_c_kicad_gerbers: String get() = Tr.s(2109)
+  val gpui_c_kicad_full_size: String get() = Tr.s(2110)
+  val gpui_c_kicad_exit_full_size: String get() = Tr.s(2111)
+  val gpui_c_kicad_the_editor_takes_the_sidebar: String get() = Tr.s(2112)
+  val gpui_c_kicad_pop_back_in: String get() = Tr.s(2113)
+  val gpui_c_kicad_back_into_backplane_s_pane: String get() = Tr.s(2114)
+  val gpui_c_kicad_the_editor_in_a_window: String get() = Tr.s(2115)
+  val gpui_c_kicad_kicad_is_open_in_its: String get() = Tr.s(2116)
+  val gpui_c_kicad_the_editor_s_window_could: String get() = Tr.s(2117)
+  fun gpui_c_kicad_changed(files: Any): String = Tr.f(2118, arrayOf<Any>(files))
+  val gpui_c_kicad_keep_yours: String get() = Tr.s(2119)
+  val gpui_c_kicad_reload_lose_your_edits: String get() = Tr.s(2120)
+  val gpui_c_kicad_a_comment_from_kicad_needs: String get() = Tr.s(2121)
+  val gpui_kcomment_nothing: String get() = Tr.s(2122)
+  val gpui_kcomment_no_capture: String get() = Tr.s(2123)
+  val gpui_kcomment_reading: String get() = Tr.s(2124)
+  val gpui_kcomment_waiting: String get() = Tr.s(2125)
+  val gpui_kcomment_timeout: String get() = Tr.s(2126)
+  val gpui_kcomment_hint: String get() = Tr.s(2127)
+  fun gpui_kcomment_not_posted(why: Any): String = Tr.f(2128, arrayOf<Any>(why))
+  val gpui_keys_kcomment: String get() = Tr.s(2129)
+  fun gpui_c_kicad_dialog(title: Any): String = Tr.f(2130, arrayOf<Any>(title))
+  fun gpui_c_kicad_asking(title: Any): String = Tr.f(2131, arrayOf<Any>(title))
+  fun gpui_kicad_update_installed(version: Any): String = Tr.f(2132, arrayOf<Any>(version))
+  fun gpui_kicad_update_missing(version: Any, size: Any, folder: Any): String = Tr.f(2133, arrayOf<Any>(version, size, folder))
+  fun gpui_kicad_update_missing_admin(version: Any, size: Any, folder: Any): String = Tr.f(2134, arrayOf<Any>(version, size, folder))
+  val gpui_kicad_update_install: String get() = Tr.s(2135)
+  val gpui_kicad_update_set_path: String get() = Tr.s(2136)
+  val gpui_c_kicad_missing_row: String get() = Tr.s(2137)
+  val gpui_c_kicad_missing_edit: String get() = Tr.s(2138)
+  val gpui_c_kicad_full_screen: String get() = Tr.s(2139)
+  val gpui_c_kicad_exit_full_screen: String get() = Tr.s(2140)
+  val gpui_c_kicad_the_editor_takes_the_whole: String get() = Tr.s(2141)
+  val gpui_c_kicad_closing: String get() = Tr.s(2142)
+  fun gpui_c_kicad_closing_ask(title: Any): String = Tr.f(2143, arrayOf<Any>(title))
+  val gpui_c_solid_load_big: String get() = Tr.s(2144)
+  val gpui_c_solid_loading_big: String get() = Tr.s(2145)
+  val gpui_c_solid_big_next: String get() = Tr.s(2146)
+  fun gpui_assets_missing(dir: Any, files: Any): String = Tr.f(2147, arrayOf<Any>(dir, files))
+  val gpui_connecting: String get() = Tr.s(2148)
+  val gpui_connected: String get() = Tr.s(2149)
+  val gpui_disconnected: String get() = Tr.s(2150)
+  val gpui_hub_is_opening_its_log: String get() = Tr.s(2151)
+  val gpui_hub_disconnected_draft_kept_reconnecting: String get() = Tr.s(2152)
+  fun gpui_hub_refused_it(why: Any): String = Tr.f(2153, arrayOf<Any>(why))
+  val gpui_that_is_not_on_this: String get() = Tr.s(2154)
+  fun gpui_hub_view_refused(code: Any): String = Tr.f(2155, arrayOf<Any>(code))
+  val gpui_no_reason_given: String get() = Tr.s(2156)
+  val gpui_this_invitation_names_only_its: String get() = Tr.s(2157)
+  val gpui_that_is_not_a_pairing: String get() = Tr.s(2158)
+  val gpui_paste_a_pairing_link_or: String get() = Tr.s(2159)
+  val gpui_check_the_hub_address_and: String get() = Tr.s(2160)
+  val gpui_that_code_is_not_correct: String get() = Tr.s(2161)
+  val gpui_this_invitation_expired_create_another: String get() = Tr.s(2162)
+  val gpui_this_invitation_has_already_been: String get() = Tr.s(2163)
+  val gpui_this_invitation_was_revoked_create: String get() = Tr.s(2164)
+  val gpui_too_many_attempts_wait_a: String get() = Tr.s(2165)
+  val gpui_this_hub_has_too_many: String get() = Tr.s(2166)
+  val gpui_the_hub_could_not_save: String get() = Tr.s(2167)
+  val gpui_the_hub_could_not_be: String get() = Tr.s(2168)
+  fun gpui_pair_pairing_with(origin: Any): String = Tr.f(2169, arrayOf<Any>(origin))
+  val gpui_this_pairing_could_not_be: String get() = Tr.s(2170)
+  fun gpui_could_not_restart(why: Any): String = Tr.f(2171, arrayOf<Any>(why))
+  val gpui_pair_with_this_hub: String get() = Tr.s(2172)
+  val gpui_a_link_opened_this_pair: String get() = Tr.s(2173)
+  val gpui_re_pair_this_device: String get() = Tr.s(2174)
+  val gpui_add_a_hub: String get() = Tr.s(2175)
+  val gpui_connect_to_your_backplane_hub: String get() = Tr.s(2176)
+  val gpui_this_device_was_revoked_make: String get() = Tr.s(2177)
+  val gpui_on_a_paired_machine_settings: String get() = Tr.s(2178)
+  val gpui_or_the_hub_s_address: String get() = Tr.s(2179)
+  val gpui_devices: String get() = Tr.s(2180)
+  val gpui_add_a_device: String get() = Tr.s(2181)
+  fun gpui_launch_hub_missing(dir: Any): String = Tr.f(2182, arrayOf<Any>(dir))
+  fun gpui_launch_could_not_make(path: Any): String = Tr.f(2183, arrayOf<Any>(path))
+  fun gpui_launch_elsewhere(home: Any, other: Any): String = Tr.f(2184, arrayOf<Any>(home, other))
+  val gpui_no_free_port: String get() = Tr.s(2185)
+  fun gpui_launch_could_not_start(path: Any): String = Tr.f(2186, arrayOf<Any>(path))
+  fun gpui_launch_stopped(code: Any, log: Any): String = Tr.f(2187, arrayOf<Any>(code, log))
+  fun gpui_launch_no_answer(log: Any): String = Tr.f(2188, arrayOf<Any>(log))
+  val gpui_that_address_did_not_answer: String get() = Tr.s(2189)
+  fun gpui_launch_unreachable(addr: Any): String = Tr.f(2190, arrayOf<Any>(addr))
+  val gpui_no_folder_for_this_device: String get() = Tr.s(2191)
+  val gpui_no_folder_for_this_program: String get() = Tr.s(2192)
+  val gpui_choose_a_folder: String get() = Tr.s(2193)
+  val gpui_give_the_full_path_starting: String get() = Tr.s(2194)
+  val gpui_that_folder_belongs_to_backplane: String get() = Tr.s(2195)
+  val gpui_that_code_was_used_already: String get() = Tr.s(2196)
+  val gpui_that_code_expired_after_ten: String get() = Tr.s(2197)
+  val gpui_that_code_was_revoked_make: String get() = Tr.s(2198)
+  val gpui_too_many_tries_wait_a: String get() = Tr.s(2199)
+  val gpui_that_hub_has_too_many: String get() = Tr.s(2200)
+  val gpui_that_code_is_wrong_check: String get() = Tr.s(2201)
+  val gpui_ask_anything_bot_thread_project: String get() = Tr.s(2202)
+  fun gpui_first_starting(home: Any): String = Tr.f(2203, arrayOf<Any>(home))
+  fun gpui_first_pairing(addr: Any): String = Tr.f(2204, arrayOf<Any>(addr))
+  val gpui_give_the_other_computer_s: String get() = Tr.s(2205)
+  val gpui_type_the_short_code_from: String get() = Tr.s(2206)
+  val gpui_where_should_backplane_keep_your: String get() = Tr.s(2207)
+  val gpui_backplane_keeps_your_threads_settings: String get() = Tr.s(2208)
+  val gpui_use_this_folder: String get() = Tr.s(2209)
+  val gpui_choose_a_folder2: String get() = Tr.s(2210)
+  val gpui_connect_to_a_hub_on: String get() = Tr.s(2211)
+  val gpui_a_hub_is_the_backplane: String get() = Tr.s(2212)
+  val gpui_this_folder_already_has_a: String get() = Tr.s(2213)
+  val gpui_backplane_old_data_is: String get() = Tr.s(2214)
+  val gpui_install_guide: String get() = Tr.s(2215)
+  val gpui_folder: String get() = Tr.s(2216)
+  val gpui_pairing_link_or_address: String get() = Tr.s(2217)
+  val gpui_short_code: String get() = Tr.s(2218)
+  fun gpui_install_failed(dir: Any, why: Any): String = Tr.f(2219, arrayOf<Any>(dir, why))
+  fun gpui_install_ask(dir: Any): String = Tr.f(2220, arrayOf<Any>(dir))
+  val gpui_needed_for_updates_not_now: String get() = Tr.s(2221)
+  val gpui_this_computer: String get() = Tr.s(2222)
+  val gpui_the_choice_could_not_be: String get() = Tr.s(2223)
+  val gpui_the_hub_could_not_be2: String get() = Tr.s(2224)
+  val gpui_pair_this_device_with_a: String get() = Tr.s(2225)
+  val gpui_in_use: String get() = Tr.s(2226)
+  val gpui_use: String get() = Tr.s(2227)
+  val gpui_the_hub_on_this_computer: String get() = Tr.s(2228)
+  val gpui_hub_home_on: String get() = Tr.s(2229)
+  val gpui_hub_home: String get() = Tr.s(2230)
+  val gpui_hub_home_away: String get() = Tr.s(2231)
+  val gpui_hub: String get() = Tr.s(2232)
+  val gpui_the_hub_is_not_answering: String get() = Tr.s(2233)
+  val gpui_restart_hub: String get() = Tr.s(2234)
+  fun gpui_hubbar_starting_phase(phase: Any): String = Tr.f(2235, arrayOf<Any>(phase))
+  val gpui_the_hub_is_starting: String get() = Tr.s(2236)
+  fun gpui_hubbar_down(why: Any): String = Tr.f(2237, arrayOf<Any>(why))
+  fun gpui_hubbar_stuck(what: Any): String = Tr.f(2238, arrayOf<Any>(what))
+  fun gpui_hubbar_said(code: Any): String = Tr.f(2239, arrayOf<Any>(code))
+  val gpui_asked_the_guard_on_this: String get() = Tr.s(2240)
+  val gpui_the_hub_s_machine_cannot: String get() = Tr.s(2241)
+  val gpui_restart_in_safe_mode: String get() = Tr.s(2242)
+  val gpui_roll_back_hub: String get() = Tr.s(2243)
+  val gpui_asking: String get() = Tr.s(2244)
+  fun gpui_hubbar_click_again(label: Any): String = Tr.f(2245, arrayOf<Any>(label))
+  val gpui_you_said: String get() = Tr.s(2246)
+  val gpui_agent_said: String get() = Tr.s(2247)
+  val gpui_action: String get() = Tr.s(2248)
+  val gpui_split: String get() = Tr.s(2249)
+  fun gpui_palette_open(kind: Any): String = Tr.f(2250, arrayOf<Any>(kind))
+  val gpui_viewer: String get() = Tr.s(2251)
+  fun gpui_palette_new_thread_in(project: Any): String = Tr.f(2252, arrayOf<Any>(project))
+  val gpui_conversation_history: String get() = Tr.s(2253)
+  val gpui_search_this_thread: String get() = Tr.s(2254)
+  val gpui_jump_to_a_thread_or: String get() = Tr.s(2255)
+  val gpui_jump_to_a_thread_run: String get() = Tr.s(2256)
+  val gpui_type_a_word_said_in: String get() = Tr.s(2257)
+  val gpui_approval: String get() = Tr.s(2258)
+  val gpui_question: String get() = Tr.s(2259)
+  val gpui_new_subthread: String get() = Tr.s(2260)
+  val gpui_move_to_top_level: String get() = Tr.s(2261)
+  val gpui_regenerate_title: String get() = Tr.s(2262)
+  val gpui_search_in_thread: String get() = Tr.s(2263)
+  val gpui_badge: String get() = Tr.s(2264)
+  fun gpui_ctx_click_again_to(what: Any): String = Tr.f(2265, arrayOf<Any>(what))
+  val gpui_snooze_tomorrow: String get() = Tr.s(2266)
+  fun gpui_ctx_snooze(`when`: Any): String = Tr.f(2267, arrayOf<Any>(`when`))
+  val gpui_goal_notes: String get() = Tr.s(2268)
+  val gpui_no_goal_yet_ask_an: String get() = Tr.s(2269)
+  val gpui_edit_goal_notes: String get() = Tr.s(2270)
+  fun gpui_projects_to_order(n: Any): String = Tr.f(2271, arrayOf<Any>(n))
+  fun gpui_projects_boards(n: Any): String = Tr.f(2272, arrayOf<Any>(n))
+  fun gpui_projects_threads(n: Any): String = Tr.f(2273, arrayOf<Any>(n))
+  val gpui_no_threads_yet: String get() = Tr.s(2274)
+  fun gpui_picker_no_effort(agent: Any): String = Tr.f(2275, arrayOf<Any>(agent))
+  fun gpui_picker_now(effort: Any): String = Tr.f(2276, arrayOf<Any>(effort))
+  val gpui_no_models: String get() = Tr.s(2277)
+  fun gpui_picker_more(n: Any): String = Tr.f(2278, arrayOf<Any>(n))
+  val gpui_picker_speed: String get() = Tr.s(2279)
+  fun gpui_picker_speed_normal_only(model: Any): String = Tr.f(2280, arrayOf<Any>(model))
+  val gpui_picker_favorites: String get() = Tr.s(2281)
+  val gpui_picker_favorite_add: String get() = Tr.s(2282)
+  val gpui_picker_favorite_remove: String get() = Tr.s(2283)
+  val gpui_speed_normal: String get() = Tr.s(2284)
+  val gpui_speed_fast: String get() = Tr.s(2285)
+  val gpui_speed_ultrafast: String get() = Tr.s(2286)
+  val gpui_speed_cost_x2: String get() = Tr.s(2287)
+  val gpui_speed_usage_x2half: String get() = Tr.s(2288)
+  val gpui_speed_usage_x8: String get() = Tr.s(2289)
+  val gpui_speed_priority_rate: String get() = Tr.s(2290)
+  val gpui_search_models: String get() = Tr.s(2291)
+  val gpui_to_do: String get() = Tr.s(2292)
+  val gpui_subagents: String get() = Tr.s(2293)
+  val gpui_add_an_item: String get() = Tr.s(2294)
+  fun gpui_panels_subagents(word: Any): String = Tr.f(2295, arrayOf<Any>(word))
+  val gpui_panels_kind_task: String get() = Tr.s(2296)
+  val gpui_runs: String get() = Tr.s(2297)
+  val gpui_doing: String get() = Tr.s(2298)
+  val gpui_asked: String get() = Tr.s(2299)
+  val gpui_steps: String get() = Tr.s(2300)
+  val gpui_none_reported_yet: String get() = Tr.s(2301)
+  fun gpui_panels_earlier(more: Any, step: Any): String = Tr.f(2302, arrayOf<Any>(more, step))
+  val gpui_reported: String get() = Tr.s(2303)
+  val gpui_paste_the_value: String get() = Tr.s(2304)
+  val gpui_a_secret_for_this_chat: String get() = Tr.s(2305)
+  fun gpui_sidebox_secret(name: Any): String = Tr.f(2306, arrayOf<Any>(name))
+  val gpui_not_needed: String get() = Tr.s(2307)
+  val gpui_attachments_need_a_hub_on: String get() = Tr.s(2308)
+  val gpui_open_a_thread_to_attach: String get() = Tr.s(2309)
+  fun gpui_attach_first(max: Any, skipped: Any): String = Tr.f(2310, arrayOf<Any>(max, skipped))
+  val gpui_img: String get() = Tr.s(2311)
+  val gpui_file: String get() = Tr.s(2312)
+  fun gpui_attach_uploading(name: Any): String = Tr.f(2313, arrayOf<Any>(name))
+  fun gpui_timeline_more_rows(n: Number): String = Tr.f(2314, arrayOf<Any>(n))
+  fun gpui_timeline_loading(name: Any): String = Tr.f(2315, arrayOf<Any>(name))
+  fun gpui_timeline_could_not_load(name: Any): String = Tr.f(2316, arrayOf<Any>(name))
+  val gpui_md_alert_note: String get() = Tr.s(2317)
+  val gpui_md_alert_tip: String get() = Tr.s(2318)
+  val gpui_md_alert_important: String get() = Tr.s(2319)
+  val gpui_md_alert_warning: String get() = Tr.s(2320)
+  val gpui_md_alert_caution: String get() = Tr.s(2321)
+  fun gpui_timeline_more_images(n: Number): String = Tr.f(2322, arrayOf<Any>(n))
+  fun gpui_order_named(name: Any): String = Tr.f(2323, arrayOf<Any>(name))
+  val gpui_buy_now: String get() = Tr.s(2324)
+  fun gpui_order_buy_now_price(price: Any): String = Tr.f(2325, arrayOf<Any>(price))
+  val gpui_order_requote: String get() = Tr.s(2326)
+  val gpui_order_unavailable_line: String get() = Tr.s(2327)
+  fun gpui_badge_away(name: Any): String = Tr.f(2328, arrayOf<Any>(name))
+  val gpui_badge_again: String get() = Tr.s(2329)
+  fun gpui_badge_on(name: Any): String = Tr.f(2330, arrayOf<Any>(name))
+  fun gpui_badge_runs_on(name: Any): String = Tr.f(2331, arrayOf<Any>(name))
+  fun gpui_badge_also_on(name: Any): String = Tr.f(2332, arrayOf<Any>(name))
+  fun gpui_unsent_restore(text: Any): String = Tr.f(2333, arrayOf<Any>(text))
+  val gpui_made_far_note: String get() = Tr.s(2334)
+  val gpui_picked_elsewhere: String get() = Tr.s(2335)
+  fun gpui_combo_key_model(key: Any): String = Tr.f(2336, arrayOf<Any>(key))
+  fun gpui_combo_key_account(key: Any): String = Tr.f(2337, arrayOf<Any>(key))
+  fun gpui_combo_left(pct: Any): String = Tr.f(2338, arrayOf<Any>(pct))
+  fun gpui_combo_resets(`when`: Any): String = Tr.f(2339, arrayOf<Any>(`when`))
+  val gpui_weekly: String get() = Tr.s(2340)
+  val gpui_state: String get() = Tr.s(2341)
+  val gpui_blocked: String get() = Tr.s(2342)
+  val gpui_finished: String get() = Tr.s(2343)
+  val gpui_inactive: String get() = Tr.s(2344)
+  val gpui_stalled: String get() = Tr.s(2345)
+  val gpui_the_right_spelling: String get() = Tr.s(2346)
+  val gpui_star_on_github: String get() = Tr.s(2347)
+  val gpui_star_dont_ask: String get() = Tr.s(2348)
+  val gpui_star_why: String get() = Tr.s(2349)
+  fun gpui_projects_unpushed(n: Number, upstream: Any): String = Tr.f(2350, arrayOf<Any>(n, upstream))
+  val gpui_projects_push: String get() = Tr.s(2351)
+  val chats_new: String get() = Tr.s(2352)
+  val chats_new_noproject: String get() = Tr.s(2353)
+  val chats_title: String get() = Tr.s(2354)
+  val chats_move: String get() = Tr.s(2355)
+  val chats_move_none: String get() = Tr.s(2356)
+  val chats_old_tip: String get() = Tr.s(2357)
+  val gpui_e_files_max_mb: String get() = Tr.s(2358)
+  fun gpui_e_files_max_note(mb: Any): String = Tr.f(2359, arrayOf<Any>(mb))
+  val gpui_e_dev_replay: String get() = Tr.s(2360)
+  val gpui_e_dev_replay_note: String get() = Tr.s(2361)
+  val gpui_e_dev_replay_button: String get() = Tr.s(2362)
+  val gpui_e_dev_star: String get() = Tr.s(2363)
+  val gpui_e_dev_star_show: String get() = Tr.s(2364)
+  val gpui_e_about_updates: String get() = Tr.s(2365)
+  val gpui_e_about_frames: String get() = Tr.s(2366)
+  val gpui_e_about_cef: String get() = Tr.s(2367)
+  val gpui_e_about_notices: String get() = Tr.s(2368)
+  fun gpui_e_about_notices_here(path: Any): String = Tr.f(2369, arrayOf<Any>(path))
+  fun gpui_e_about_notices_hub(path: Any): String = Tr.f(2370, arrayOf<Any>(path))
+  val gpui_e_open_folder: String get() = Tr.s(2371)
+  val gpui_e_agents_thinking: String get() = Tr.s(2372)
+  val gpui_e_agents_thinking_note: String get() = Tr.s(2373)
+  val gpui_e_agents_recall: String get() = Tr.s(2374)
+  val gpui_e_agents_recall_note: String get() = Tr.s(2375)
+  val gpui_e_order_comes: String get() = Tr.s(2376)
+  val gpui_e_devices_local_machine: String get() = Tr.s(2377)
+  val gpui_e_rules_standing: String get() = Tr.s(2378)
+  val gpui_e_rules_words: String get() = Tr.s(2379)
+  val gpui_e_rules_eg: String get() = Tr.s(2380)
+  val gpui_e_rules_add: String get() = Tr.s(2381)
+  val gpui_e_board_doing: String get() = Tr.s(2382)
+  val gpui_e_board_todo: String get() = Tr.s(2383)
+  val gpui_e_board_what: String get() = Tr.s(2384)
+  val gpui_e_board_eg: String get() = Tr.s(2385)
+  val gpui_e_board_add: String get() = Tr.s(2386)
+  val gpui_e_tz_phone_again: String get() = Tr.s(2387)
+  val gpui_e_tz_machine_again: String get() = Tr.s(2388)
+  val gpui_e_tz_phone_auto: String get() = Tr.s(2389)
+  val gpui_e_tz_machine_auto: String get() = Tr.s(2390)
+  val gpui_e_privacy_note: String get() = Tr.s(2391)
+  fun gpui_e_privacy_note_id(id: Any): String = Tr.f(2392, arrayOf<Any>(id))
+  val gpui_e_privacy_share: String get() = Tr.s(2393)
+  val gpui_e_privacy_reset: String get() = Tr.s(2394)
+  val gpui_e_privacy_report: String get() = Tr.s(2395)
+  fun gpui_e_writing_model_note(model: Any): String = Tr.f(2396, arrayOf<Any>(model))
+  fun gpui_e_kicad_none(platform: Any): String = Tr.f(2397, arrayOf<Any>(platform))
+  fun gpui_e_kicad_installing(version: Any): String = Tr.f(2398, arrayOf<Any>(version))
+  val gpui_e_kicad_starting: String get() = Tr.s(2399)
+  val gpui_e_kicad_ask: String get() = Tr.s(2400)
+  fun gpui_e_kicad_ask_note(version: Any, from: Any, into: Any): String = Tr.f(2401, arrayOf<Any>(version, from, into))
+  fun gpui_e_kicad_offer(version: Any, from: Any): String = Tr.f(2402, arrayOf<Any>(version, from))
+  val gpui_e_kicad_own: String get() = Tr.s(2403)
+  val gpui_e_kicad_notfound: String get() = Tr.s(2404)
+  fun gpui_e_kicad_found_version(version: Any, path: Any): String = Tr.f(2405, arrayOf<Any>(version, path))
+  fun gpui_e_kicad_found_stock(version: Any, path: Any): String = Tr.f(2406, arrayOf<Any>(version, path))
+  fun gpui_e_kicad_offer_stock(version: Any, pin: Any, from: Any): String = Tr.f(2407, arrayOf<Any>(version, pin, from))
+  fun gpui_e_kicad_found(path: Any): String = Tr.f(2408, arrayOf<Any>(path))
+  fun gpui_e_kicad_just(version: Any, path: Any): String = Tr.f(2409, arrayOf<Any>(version, path))
+  fun gpui_e_kicad_passed(version: Any, path: Any, set: Any): String = Tr.f(2410, arrayOf<Any>(version, path, set))
+  val gpui_e_kicad_checking: String get() = Tr.s(2411)
+  val gpui_e_kicad_path_hint: String get() = Tr.s(2412)
+  val gpui_e_freecad_notfound: String get() = Tr.s(2413)
+  val gpui_e_freecad_notat: String get() = Tr.s(2414)
+  val gpui_e_freecad_path_hint: String get() = Tr.s(2415)
+  val gpui_e_keys_kept: String get() = Tr.s(2416)
+  val gpui_e_keys_again: String get() = Tr.s(2417)
+  val gpui_e_keys_forget_it: String get() = Tr.s(2418)
+  val gpui_e_keys_note: String get() = Tr.s(2419)
+  val gpui_e_fallback_unavailable: String get() = Tr.s(2420)
+  val gpui_e_fallback_provider: String get() = Tr.s(2421)
+  val gpui_e_fallback_provider_note: String get() = Tr.s(2422)
+  val gpui_e_fallback_add: String get() = Tr.s(2423)
+  fun gpui_e_usage_line(turns: Number, input: Any, cread: Any, cwrite: Any, output: Any, cost: Any): String = Tr.f(2424, arrayOf<Any>(turns, input, cread, cwrite, output, cost))
+  val gpui_e_cost_not_reported: String get() = Tr.s(2425)
+  val gpui_e_usage_title: String get() = Tr.s(2426)
+  val gpui_e_usage_none: String get() = Tr.s(2427)
+  val gpui_e_usage_unknown: String get() = Tr.s(2428)
+  val gpui_e_usage_all: String get() = Tr.s(2429)
+  val gpui_e_page_back: String get() = Tr.s(2430)
+  fun gpui_e_rules_on_refuses(tool: Any): String = Tr.f(2431, arrayOf<Any>(tool))
+  fun gpui_e_rules_off_refuses(tool: Any): String = Tr.f(2432, arrayOf<Any>(tool))
+  fun gpui_e_rules_on_refuses_word(tool: Any, word: Any): String = Tr.f(2433, arrayOf<Any>(tool, word))
+  fun gpui_e_rules_off_refuses_word(tool: Any, word: Any): String = Tr.f(2434, arrayOf<Any>(tool, word))
+  fun gpui_e_rules_on_using(tool: Any): String = Tr.f(2435, arrayOf<Any>(tool))
+  fun gpui_e_rules_off_using(tool: Any): String = Tr.f(2436, arrayOf<Any>(tool))
+  fun gpui_e_board_doing_due(due: Any): String = Tr.f(2437, arrayOf<Any>(due))
+  fun gpui_e_board_blocked_due(due: Any): String = Tr.f(2438, arrayOf<Any>(due))
+  fun gpui_e_board_todo_due(due: Any): String = Tr.f(2439, arrayOf<Any>(due))
+  fun gpui_e_board_done_due(due: Any): String = Tr.f(2440, arrayOf<Any>(due))
+  fun gpui_e_tz_zone_set(zone: Any): String = Tr.f(2441, arrayOf<Any>(zone))
+  fun gpui_e_tz_zone_phone(zone: Any): String = Tr.f(2442, arrayOf<Any>(zone))
+  fun gpui_e_tz_zone_machine(zone: Any): String = Tr.f(2443, arrayOf<Any>(zone))
+  fun gpui_e_tz_zone_none(zone: Any): String = Tr.f(2444, arrayOf<Any>(zone))
+  fun gpui_e_subs_done(n: Any): String = Tr.f(2445, arrayOf<Any>(n))
+  fun gpui_e_lock_starting(who: Any): String = Tr.f(2446, arrayOf<Any>(who))
+  fun gpui_e_lock_position(n: Any, who: Any): String = Tr.f(2447, arrayOf<Any>(n, who))
+  fun gpui_e_subs_where(harness: Any): String = Tr.f(2448, arrayOf<Any>(harness))
+  fun gpui_e_picker_already(path: Any): String = Tr.f(2449, arrayOf<Any>(path))
+  fun gpui_e_picker_create(path: Any): String = Tr.f(2450, arrayOf<Any>(path))
+  fun gpui_e_picker_notdir(path: Any): String = Tr.f(2451, arrayOf<Any>(path))
+  val gpui_e_picker_hint: String get() = Tr.s(2452)
+  val gpui_e_fab_nogoal: String get() = Tr.s(2453)
+  fun gpui_e_fab_unavailable_line(error: Any, line: Any): String = Tr.f(2454, arrayOf<Any>(error, line))
+  fun gpui_e_fab_buy_label(label: Any): String = Tr.f(2455, arrayOf<Any>(label))
+  val gpui_e_tools_back: String get() = Tr.s(2456)
+  val gpui_e_tools_back_tip: String get() = Tr.s(2457)
+  val gpui_e_status_working: String get() = Tr.s(2458)
+  val gpui_e_status_inactive: String get() = Tr.s(2459)
+  val gpui_e_status_finished: String get() = Tr.s(2460)
+  val gpui_e_status_waiting: String get() = Tr.s(2461)
+  val gpui_e_status_blocked: String get() = Tr.s(2462)
+  fun gpui_e_acct_saved(who: Any): String = Tr.f(2463, arrayOf<Any>(who))
+  fun gpui_e_acct_cli(who: Any): String = Tr.f(2464, arrayOf<Any>(who))
+  fun gpui_e_acct_window_resets(label: Any, left: Any, `when`: Any): String = Tr.f(2465, arrayOf<Any>(label, left, `when`))
+  fun gpui_e_acct_default_left(left: Any): String = Tr.f(2466, arrayOf<Any>(left))
+  fun gpui_e_acct_profile_left(name: Any, left: Any): String = Tr.f(2467, arrayOf<Any>(name, left))
+  fun gpui_e_acct_extra_off(used: Any): String = Tr.f(2468, arrayOf<Any>(used))
+  fun gpui_e_acct_extra_of_off(used: Any, limit: Any): String = Tr.f(2469, arrayOf<Any>(used, limit))
+  fun gpui_e_acct_extra_off_why(used: Any, reason: Any): String = Tr.f(2470, arrayOf<Any>(used, reason))
+  fun gpui_e_acct_extra_of_off_why(used: Any, limit: Any, reason: Any): String = Tr.f(2471, arrayOf<Any>(used, limit, reason))
+  val gpui_e_tok_noreading: String get() = Tr.s(2472)
+  fun gpui_e_tok_notby(provider: Any): String = Tr.f(2473, arrayOf<Any>(provider))
+  fun gpui_e_tok_ofwindow(used: Any, window: Any, pct: Any): String = Tr.f(2474, arrayOf<Any>(used, window, pct))
+  fun gpui_e_tok_rate(rate: Any): String = Tr.f(2475, arrayOf<Any>(rate))
+  val gpui_e_tok_held: String get() = Tr.s(2476)
+  val gpui_e_tok_room: String get() = Tr.s(2477)
+  val gpui_e_tok_noturn: String get() = Tr.s(2478)
+  val gpui_e_tok_tokens_label: String get() = Tr.s(2479)
+  val gpui_e_tok_nottold: String get() = Tr.s(2480)
+  val gpui_e_tok_input: String get() = Tr.s(2481)
+  val gpui_e_tok_cread: String get() = Tr.s(2482)
+  val gpui_e_tok_cwrite: String get() = Tr.s(2483)
+  val gpui_e_tok_output: String get() = Tr.s(2484)
+  fun gpui_e_tok_output_reasoning(n: Any, r: Any): String = Tr.f(2485, arrayOf<Any>(n, r))
+  val gpui_e_tok_cost: String get() = Tr.s(2486)
+  val gpui_e_tok_notreported: String get() = Tr.s(2487)
+  val gpui_e_tok_speed: String get() = Tr.s(2488)
+  val gpui_e_tok_modeltime: String get() = Tr.s(2489)
+  fun gpui_e_tok_modeltime_steps(time: Any, n: Number): String = Tr.f(2490, arrayOf<Any>(time, n))
+  val gpui_e_tok_turntime: String get() = Tr.s(2491)
+  val gpui_e_tok_noturns: String get() = Tr.s(2492)
+  val gpui_e_tok_turns: String get() = Tr.s(2493)
+  fun gpui_e_tok_turns_unknown(n: Any, m: Any): String = Tr.f(2494, arrayOf<Any>(n, m))
+  val gpui_e_tok_hits: String get() = Tr.s(2495)
+  fun gpui_e_tok_hits_of(pct: Any): String = Tr.f(2496, arrayOf<Any>(pct))
+  fun gpui_e_tok_cost_some(cost: Any, n: Any): String = Tr.f(2497, arrayOf<Any>(cost, n))
+  val gpui_e_tok_avg: String get() = Tr.s(2498)
+  val gpui_e_tok_last: String get() = Tr.s(2499)
+  val gpui_e_tok_bymodel: String get() = Tr.s(2500)
+  fun gpui_e_tok_model_line(`in`: Any, out: Any, cread: Any, cwrite: Any): String = Tr.f(2501, arrayOf<Any>(`in`, out, cread, cwrite))
+  fun gpui_e_tok_model_line_web(`in`: Any, out: Any, cread: Any, cwrite: Any, n: Any): String = Tr.f(2502, arrayOf<Any>(`in`, out, cread, cwrite, n))
+  val gpui_e_tok_speed_note: String get() = Tr.s(2503)
+  val gpui_e_viewer_noproject: String get() = Tr.s(2504)
+  val gpui_e_viewer_remote_files: String get() = Tr.s(2505)
+  val gpui_e_viewer_remote_parts: String get() = Tr.s(2506)
+  val gpui_e_viewer_noparts: String get() = Tr.s(2507)
+  val gpui_e_order_how: String get() = Tr.s(2508)
+  val gpui_e_fallback_note: String get() = Tr.s(2509)
+  val gpui_e_fallback_model: String get() = Tr.s(2510)
+  fun gpui_e_usage_line_nocost(turns: Number, input: Any, cread: Any, cwrite: Any, output: Any): String = Tr.f(2511, arrayOf<Any>(turns, input, cread, cwrite, output))
+  fun gpui_e_acct_weekly_resets(left: Any, `when`: Any): String = Tr.f(2512, arrayOf<Any>(left, `when`))
+  fun gpui_e_acct_hour5_resets(left: Any, `when`: Any): String = Tr.f(2513, arrayOf<Any>(left, `when`))
+  fun gpui_e_acct_opus_resets(left: Any, `when`: Any): String = Tr.f(2514, arrayOf<Any>(left, `when`))
+  fun gpui_e_acct_sonnet_resets(left: Any, `when`: Any): String = Tr.f(2515, arrayOf<Any>(left, `when`))
+  val notify_which_alerts_reach_you_quiet: String get() = Tr.s(2516)
+  val notify_notifications: String get() = Tr.s(2517)
+  val notify_phones: String get() = Tr.s(2518)
+  val notify_only_your_uberbot_pushes_to: String get() = Tr.s(2519)
+  val notify_quiet_hours: String get() = Tr.s(2520)
+  val notify_a_push_waits_until_the: String get() = Tr.s(2521)
+  val notify_quiet_from_and_until: String get() = Tr.s(2522)
+  val notify_hh_mm_hours: String get() = Tr.s(2523)
+  val notify_quiet_from_hint: String get() = Tr.s(2524)
+  val notify_quiet_until_hint: String get() = Tr.s(2525)
+  val notify_times_are_hh_mm_hours: String get() = Tr.s(2526)
+  val notify_quiet_hours_are_hh_mm: String get() = Tr.s(2527)
+  val notify_urgent_asks_come_through: String get() = Tr.s(2528)
+  val notify_an_approval_or_a_question: String get() = Tr.s(2529)
+  val notify_iphones_that_hear_a_push: String get() = Tr.s(2530)
+  val notify_none_yet_an_iphone_registers: String get() = Tr.s(2531)
+  val notify_muted_hears_only_what_urgent: String get() = Tr.s(2532)
+  val notify_hears_alerts: String get() = Tr.s(2533)
+  val notify_hears: String get() = Tr.s(2534)
+  val notify_muted: String get() = Tr.s(2535)
+  val gpui_e_failover_failover_order: String get() = Tr.s(2536)
+  val gpui_e_failover_applies_to_all_threads_bots: String get() = Tr.s(2537)
+  val gpui_e_failover_not_installed_on_this_machine: String get() = Tr.s(2538)
+  val gpui_e_failover_its_own_sign_in_on: String get() = Tr.s(2539)
+  val gpui_e_failover_account: String get() = Tr.s(2540)
+  fun gpui_e_failover_accounts_the_one_with_the(n: Any): String = Tr.f(2541, arrayOf<Any>(n))
+  val gpui_e_failover_default_order: String get() = Tr.s(2542)
+  val gpui_e_failover_use_the_default_order: String get() = Tr.s(2543)
+  val gpui_e_failover_choose_an_installed_provider_and: String get() = Tr.s(2544)
+  val gpui_e_failover_add_to_the_order: String get() = Tr.s(2545)
+  val gpui_e_failover_already_in_the_order: String get() = Tr.s(2546)
+  val gpui_e_failover_not_installed_here: String get() = Tr.s(2547)
+  val ring_ring: String get() = Tr.s(2548)
+  val ring_pebble_index_ring: String get() = Tr.s(2549)
+  val ring_test_event: String get() = Tr.s(2550)
+  val ring_recordings: String get() = Tr.s(2551)
+  val ring_search_what_you_said: String get() = Tr.s(2552)
+  val ring_copy_header: String get() = Tr.s(2553)
+  val ring_copy_both: String get() = Tr.s(2554)
+  val ring_set_up_again: String get() = Tr.s(2555)
+  val ring_show_all: String get() = Tr.s(2556)
+  val ring_hear_again_local: String get() = Tr.s(2557)
+  val ring_hear_again_openai: String get() = Tr.s(2558)
+  val ring_what_happened: String get() = Tr.s(2559)
+  val ring_send_again: String get() = Tr.s(2560)
+  val ring_no_recordings_yet: String get() = Tr.s(2561)
+  val hub_acct_claude_sync: String get() = Tr.s(2562)
+  val hub_acct_add_a_claude_sync_token: String get() = Tr.s(2563)
+  val hub_acct_connected_sync_token: String get() = Tr.s(2564)
+  val hub_acct_sync_token_ended: String get() = Tr.s(2565)
+  fun hub_acct_sync_token_ends(`when`: Any): String = Tr.f(2566, arrayOf<Any>(`when`))
+  val gpui_e_telemetry_notice: String get() = Tr.s(2567)
+  val voice_cmd_sending: String get() = Tr.s(2568)
+  val voice_cmd_cleared: String get() = Tr.s(2569)
+  val voice_cmd_sent: String get() = Tr.s(2570)
+  val voice_cmd_undo: String get() = Tr.s(2571)
+  val settings_voice_cmd_send: String get() = Tr.s(2572)
+  fun settings_voice_cmd_send_note(phrase: Any, now: Any): String = Tr.f(2573, arrayOf<Any>(phrase, now))
+  val settings_voice_cmd_off: String get() = Tr.s(2574)
+  val settings_voice_cmd_hint: String get() = Tr.s(2575)
+  val settings_voice_cmd_default: String get() = Tr.s(2576)
+  val settings_voice_cmds: String get() = Tr.s(2577)
+  val settings_voice_cmds_note: String get() = Tr.s(2578)
+  val voice_cmd_scratch: String get() = Tr.s(2579)
+  val voice_cmd_newline: String get() = Tr.s(2580)
+  val voice_cmd_cancel: String get() = Tr.s(2581)
+  val settings_voice_auto: String get() = Tr.s(2582)
+  val settings_voice_auto_note: String get() = Tr.s(2583)
+  fun voice_cmd_secs(s: Any): String = Tr.f(2584, arrayOf<Any>(s))
+  val voice_eot_sending: String get() = Tr.s(2585)
+  val voice_eot_hold: String get() = Tr.s(2586)
+  val settings_voice_eot: String get() = Tr.s(2587)
+  val settings_voice_eot_note: String get() = Tr.s(2588)
+  val settings_voice_eot_eager: String get() = Tr.s(2589)
+  fun settings_voice_eot_eager_note(now: Any): String = Tr.f(2590, arrayOf<Any>(now))
+  fun settings_voice_eot_eager_learned(now: Any, nudge: Any, sent: Any, undone: Any): String = Tr.f(2591, arrayOf<Any>(now, nudge, sent, undone))
+  val settings_voice_eot_reset: String get() = Tr.s(2592)
+  val settings_voice_jev: String get() = Tr.s(2593)
+  val settings_voice_jev_set: String get() = Tr.s(2594)
+  val settings_voice_jev_unset: String get() = Tr.s(2595)
+  val settings_voice_jev_key: String get() = Tr.s(2596)
+  val settings_voice_jev_use: String get() = Tr.s(2597)
+  val settings_voice_jev_test: String get() = Tr.s(2598)
+  val settings_voice_jev_model: String get() = Tr.s(2599)
+  val settings_voice_jev_check: String get() = Tr.s(2600)
+  fun settings_voice_jev_failed(e: Any): String = Tr.f(2601, arrayOf<Any>(e))
+  fun settings_voice_jev_result(a: Any, ams: Any, b: Any, bms: Any): String = Tr.f(2602, arrayOf<Any>(a, ams, b, bms))
+  fun settings_voice_jev_last(ms: Any): String = Tr.f(2603, arrayOf<Any>(ms))
+  fun settings_voice_jev_fallback(e: Any): String = Tr.f(2604, arrayOf<Any>(e))
+  fun voice_eot_eager_label(t: Any): String = Tr.f(2605, arrayOf<Any>(t))
+  fun voice_eot_default_label(t: Any): String = Tr.f(2606, arrayOf<Any>(t))
+  fun voice_eot_patient_label(t: Any): String = Tr.f(2607, arrayOf<Any>(t))
+  val voice_always_listening: String get() = Tr.s(2608)
+  val voice_always_paused: String get() = Tr.s(2609)
+  val voice_always_muted: String get() = Tr.s(2610)
+  val keys_always: String get() = Tr.s(2611)
+  val voice_always_status: String get() = Tr.s(2612)
+  fun voice_always_note_paused(why: Any): String = Tr.f(2613, arrayOf<Any>(why))
+  val settings_voice_always: String get() = Tr.s(2614)
+  val settings_voice_always_note: String get() = Tr.s(2615)
+  val settings_voice_always_start: String get() = Tr.s(2616)
+  val settings_voice_always_start_note: String get() = Tr.s(2617)
+  val settings_voice_always_word1: String get() = Tr.s(2618)
+  val settings_voice_always_word2: String get() = Tr.s(2619)
+  val settings_voice_always_ms: String get() = Tr.s(2620)
+  val settings_voice_always_pause: String get() = Tr.s(2621)
+  val settings_voice_always_pause_note: String get() = Tr.s(2622)
+  fun settings_voice_always_pause_note2(apps: Any): String = Tr.f(2623, arrayOf<Any>(apps))
+  val settings_voice_always_ignore: String get() = Tr.s(2624)
+  val settings_voice_always_lock: String get() = Tr.s(2625)
+  val settings_voice_always_call: String get() = Tr.s(2626)
+  val settings_voice_always_away: String get() = Tr.s(2627)
+  val settings_voice_always_saveapps: String get() = Tr.s(2628)
+  val settings_voice_always_target: String get() = Tr.s(2629)
+  val settings_voice_always_target_note: String get() = Tr.s(2630)
+  val settings_voice_always_open: String get() = Tr.s(2631)
+  val settings_voice_speaker: String get() = Tr.s(2632)
+  fun settings_voice_speaker_on(n: Any): String = Tr.f(2633, arrayOf<Any>(n))
+  fun settings_voice_speaker_learning(n: Any, k: Any): String = Tr.f(2634, arrayOf<Any>(n, k))
+  val settings_voice_speaker_reenrol: String get() = Tr.s(2635)
+  val voice_always_pill_listening: String get() = Tr.s(2636)
+  val voice_always_pill_paused: String get() = Tr.s(2637)
+  val voice_always_pill_listen: String get() = Tr.s(2638)
+  fun voice_mark_tip(stt: Any, conf: Any): String = Tr.f(2639, arrayOf<Any>(stt, conf))
+  fun voice_mark_unsure(words: Any): String = Tr.f(2640, arrayOf<Any>(words))
+  val voice_mark_edited: String get() = Tr.s(2641)
+  val gpui_side_old_chats_that_belong_to: String get() = Tr.s(2642)
+  val gpui_side_group_projects: String get() = Tr.s(2643)
+  val gpui_side_on_projects_with_nothing_going: String get() = Tr.s(2644)
+  val gpui_side_no_group: String get() = Tr.s(2645)
+  val gpui_e_freecad_install: String get() = Tr.s(2646)
+  val gpui_e_freecad_ask: String get() = Tr.s(2647)
+  val gpui_e_freecad_installing: String get() = Tr.s(2648)
+  val gpui_e_freecad_page: String get() = Tr.s(2649)
+  fun gpui_e_freecad_ask_note(into: Any): String = Tr.f(2650, arrayOf<Any>(into))
+  val gpui_e_freecad_offer: String get() = Tr.s(2651)
+  val gpui_e_picker_clone_hint: String get() = Tr.s(2652)
+  fun gpui_e_picker_clone_typed(origin: Any): String = Tr.f(2653, arrayOf<Any>(origin))
+  val settings_git_page: String get() = Tr.s(2654)
+  val settings_git_autopush: String get() = Tr.s(2655)
+  val settings_git_autopush_note: String get() = Tr.s(2656)
+  val settings_git_notice: String get() = Tr.s(2657)
+  val settings_git_offbranch: String get() = Tr.s(2658)
+  val settings_git_offbranch_note: String get() = Tr.s(2659)
+  val settings_browser_start: String get() = Tr.s(2660)
+  val settings_browser_start_note: String get() = Tr.s(2661)
+  val settings_browser_opens: String get() = Tr.s(2662)
+  val settings_browser_reset: String get() = Tr.s(2663)
+  val settings_browser_blank: String get() = Tr.s(2664)
+  fun settings_browser_now_default(url: Any): String = Tr.f(2665, arrayOf<Any>(url))
+  val settings_browser_now_blank: String get() = Tr.s(2666)
+  fun settings_browser_now(url: Any): String = Tr.f(2667, arrayOf<Any>(url))
+  val settings_browser_bad: String get() = Tr.s(2668)
+  val gpui_f_group_install: String get() = Tr.s(2669)
+  val gpui_f_group_agents: String get() = Tr.s(2670)
+  val gpui_f_group_cad: String get() = Tr.s(2671)
+  val gpui_f_group_devices: String get() = Tr.s(2672)
+  val gpui_f_group_first: String get() = Tr.s(2673)
+  val gpui_f_group_tour: String get() = Tr.s(2674)
+  fun gpui_f_counter(i: Number, n: Number): String = Tr.f(2675, arrayOf<Any>(i, n))
+  fun gpui_f_progress(d: Number, n: Number): String = Tr.f(2676, arrayOf<Any>(d, n))
+  val gpui_f_next: String get() = Tr.s(2677)
+  val gpui_f_skip_step: String get() = Tr.s(2678)
+  val gpui_f_finish_later: String get() = Tr.s(2679)
+  val gpui_f_end_setup: String get() = Tr.s(2680)
+  val gpui_f_finish_setup: String get() = Tr.s(2681)
+  val gpui_f_welcome: String get() = Tr.s(2682)
+  val gpui_f_welcome_body: String get() = Tr.s(2683)
+  val gpui_f_installed: String get() = Tr.s(2684)
+  fun gpui_f_install_body_linux(version: Any): String = Tr.f(2685, arrayOf<Any>(version))
+  fun gpui_f_install_body_darwin(version: Any): String = Tr.f(2686, arrayOf<Any>(version))
+  fun gpui_f_install_body_windows(version: Any): String = Tr.f(2687, arrayOf<Any>(version))
+  val gpui_f_program: String get() = Tr.s(2688)
+  val gpui_f_terminal_command: String get() = Tr.s(2689)
+  fun gpui_f_found_at(path: Any): String = Tr.f(2690, arrayOf<Any>(path))
+  val gpui_f_path_fix: String get() = Tr.s(2691)
+  val gpui_f_path_fix_windows: String get() = Tr.s(2692)
+  val gpui_f_updates: String get() = Tr.s(2693)
+  val gpui_f_updates_note: String get() = Tr.s(2694)
+  val gpui_f_home_title: String get() = Tr.s(2695)
+  val gpui_f_home_body: String get() = Tr.s(2696)
+  val gpui_f_data_folder: String get() = Tr.s(2697)
+  fun gpui_f_hub_listens(addr: Any): String = Tr.f(2698, arrayOf<Any>(addr))
+  val gpui_f_other_folder: String get() = Tr.s(2699)
+  val gpui_f_other_folder_note: String get() = Tr.s(2700)
+  val gpui_f_choose_folder: String get() = Tr.s(2701)
+  fun gpui_f_installing(label: Any): String = Tr.f(2702, arrayOf<Any>(label))
+  val gpui_f_starting: String get() = Tr.s(2703)
+  fun gpui_f_did_not_install(label: Any): String = Tr.f(2704, arrayOf<Any>(label))
+  fun gpui_f_install_label(label: Any): String = Tr.f(2705, arrayOf<Any>(label))
+  val gpui_f_winget_note: String get() = Tr.s(2706)
+  val gpui_f_runs_codex: String get() = Tr.s(2707)
+  val gpui_f_runs_vendor: String get() = Tr.s(2708)
+  fun gpui_f_get_label(label: Any): String = Tr.f(2709, arrayOf<Any>(label))
+  val gpui_f_opens_download: String get() = Tr.s(2710)
+  val gpui_f_checking: String get() = Tr.s(2711)
+  val gpui_f_import_title: String get() = Tr.s(2712)
+  val gpui_f_import_copied: String get() = Tr.s(2713)
+  fun gpui_f_import_body(from: Any): String = Tr.f(2714, arrayOf<Any>(from))
+  val gpui_f_import_nothing: String get() = Tr.s(2715)
+  val gpui_f_import_nothing_note: String get() = Tr.s(2716)
+  val gpui_f_import_what: String get() = Tr.s(2717)
+  val gpui_f_import_notcounted: String get() = Tr.s(2718)
+  val gpui_f_import_count: String get() = Tr.s(2719)
+  val gpui_f_import_counting: String get() = Tr.s(2720)
+  val gpui_f_import_reading: String get() = Tr.s(2721)
+  val gpui_f_import_nothing_new: String get() = Tr.s(2722)
+  val gpui_f_import_here_already: String get() = Tr.s(2723)
+  val gpui_f_import_count_again: String get() = Tr.s(2724)
+  val gpui_f_import_comes: String get() = Tr.s(2725)
+  val gpui_f_import_import: String get() = Tr.s(2726)
+  val gpui_f_import_import_note: String get() = Tr.s(2727)
+  val gpui_f_import_withkeys: String get() = Tr.s(2728)
+  val gpui_f_import_withkeys_note: String get() = Tr.s(2729)
+  val gpui_f_import_importing: String get() = Tr.s(2730)
+  fun gpui_f_import_events(done: Number, of: Number): String = Tr.f(2731, arrayOf<Any>(done, of))
+  val gpui_f_import_imported: String get() = Tr.s(2732)
+  val gpui_f_import_nothing_came: String get() = Tr.s(2733)
+  val gpui_f_import_again: String get() = Tr.s(2734)
+  val gpui_f_import_again_note: String get() = Tr.s(2735)
+  val gpui_f_import_stopped: String get() = Tr.s(2736)
+  fun gpui_f_import_n_projects(n: Number): String = Tr.f(2737, arrayOf<Any>(n))
+  fun gpui_f_import_n_threads(t: Number, m: Number): String = Tr.f(2738, arrayOf<Any>(t, m))
+  fun gpui_f_import_n_newmsgs(m: Number): String = Tr.f(2739, arrayOf<Any>(m))
+  fun gpui_f_import_n_bots(b: Number, m: Number): String = Tr.f(2740, arrayOf<Any>(b, m))
+  fun gpui_f_import_n_rooms(r: Number, p: Number): String = Tr.f(2741, arrayOf<Any>(r, p))
+  fun gpui_f_import_n_routines(n: Number): String = Tr.f(2742, arrayOf<Any>(n))
+  fun gpui_f_import_n_settings(n: Number): String = Tr.f(2743, arrayOf<Any>(n))
+  fun gpui_f_import_n_devices(n: Number): String = Tr.f(2744, arrayOf<Any>(n))
+  fun gpui_f_import_n_subagents(n: Number): String = Tr.f(2745, arrayOf<Any>(n))
+  val gpui_f_import_nothing_new_dot: String get() = Tr.s(2746)
+  val gpui_f_note_mailruns: String get() = Tr.s(2747)
+  fun gpui_f_note_mailruns_text(n: Number): String = Tr.f(2748, arrayOf<Any>(n))
+  val gpui_f_note_routines: String get() = Tr.s(2749)
+  fun gpui_f_note_routines_text(n: Number): String = Tr.f(2750, arrayOf<Any>(n))
+  val gpui_f_note_machines: String get() = Tr.s(2751)
+  val gpui_f_note_machines_text: String get() = Tr.s(2752)
+  val gpui_f_note_keys: String get() = Tr.s(2753)
+  val gpui_f_note_keys_text: String get() = Tr.s(2754)
+  val gpui_f_note_google: String get() = Tr.s(2755)
+  val gpui_f_note_google_text: String get() = Tr.s(2756)
+  val gpui_f_note_clashes: String get() = Tr.s(2757)
+  fun gpui_f_note_clashes_text(n: Number): String = Tr.f(2758, arrayOf<Any>(n))
+  val gpui_f_note_fresh: String get() = Tr.s(2759)
+  val gpui_f_note_fresh_text: String get() = Tr.s(2760)
+  val gpui_f_note_running: String get() = Tr.s(2761)
+  val gpui_f_note_running_text: String get() = Tr.s(2762)
+  val gpui_f_note_botfolder: String get() = Tr.s(2763)
+  fun gpui_f_note_botfolder_text(name: Any, gb: Any, path: Any): String = Tr.f(2764, arrayOf<Any>(name, gb, path))
+  val gpui_f_note_notcopied: String get() = Tr.s(2765)
+  fun gpui_f_note_notcopied_text(path: Any, why: Any): String = Tr.f(2766, arrayOf<Any>(path, why))
+  val gpui_f_note_signin: String get() = Tr.s(2767)
+  fun gpui_f_note_signin_text(names: Any): String = Tr.f(2768, arrayOf<Any>(names))
+  val gpui_f_note_accounts_text: String get() = Tr.s(2769)
+  fun gpui_f_note_vault_text(why: Any): String = Tr.f(2770, arrayOf<Any>(why))
+  fun gpui_f_ov_counts(p: Number, pn: Number, t: Number, tn: Number, e: Number, en: Number): String = Tr.f(2771, arrayOf<Any>(p, pn, t, tn, e, en))
+  fun gpui_f_ov_mb(done: Number, total: Number): String = Tr.f(2772, arrayOf<Any>(done, total))
+  fun gpui_f_ov_files(n: Number): String = Tr.f(2773, arrayOf<Any>(n))
+  fun gpui_f_ov_now(what: Any): String = Tr.f(2774, arrayOf<Any>(what))
+  fun gpui_f_ov_min(n: Number): String = Tr.f(2775, arrayOf<Any>(n))
+  fun gpui_f_ov_s(n: Number): String = Tr.f(2776, arrayOf<Any>(n))
+  val gpui_f_ov_measuring: String get() = Tr.s(2777)
+  val gpui_f_ov_title: String get() = Tr.s(2778)
+  fun gpui_f_ov_body(what: Any): String = Tr.f(2779, arrayOf<Any>(what))
+  fun gpui_f_ov_took(n: Number): String = Tr.f(2780, arrayOf<Any>(n))
+  val gpui_f_ov_here: String get() = Tr.s(2781)
+  fun gpui_f_ov_failed_in(why: Any, from: Any): String = Tr.f(2782, arrayOf<Any>(why, from))
+  fun gpui_f_ov_failed(why: Any): String = Tr.f(2783, arrayOf<Any>(why))
+  val gpui_f_usage_title: String get() = Tr.s(2784)
+  val gpui_f_usage_body: String get() = Tr.s(2785)
+  val gpui_f_usage_share: String get() = Tr.s(2786)
+  val gpui_f_usage_saved: String get() = Tr.s(2787)
+  val gpui_f_usage_choose: String get() = Tr.s(2788)
+  fun gpui_f_agent_found_signed(path: Any): String = Tr.f(2789, arrayOf<Any>(path))
+  fun gpui_f_agent_found_signed_who(path: Any, who: Any): String = Tr.f(2790, arrayOf<Any>(path, who))
+  fun gpui_f_agent_found_notsigned(path: Any): String = Tr.f(2791, arrayOf<Any>(path))
+  fun gpui_f_agent_found_howsign(path: Any, cmd: Any): String = Tr.f(2792, arrayOf<Any>(path, cmd))
+  fun gpui_f_agent_version(version: Any, path: Any): String = Tr.f(2793, arrayOf<Any>(version, path))
+  fun gpui_f_agent_version_signed(version: Any, path: Any): String = Tr.f(2794, arrayOf<Any>(version, path))
+  fun gpui_f_agent_version_signed_who(version: Any, path: Any, who: Any): String = Tr.f(2795, arrayOf<Any>(version, path, who))
+  fun gpui_f_agent_version_notsigned(version: Any, path: Any): String = Tr.f(2796, arrayOf<Any>(version, path))
+  fun gpui_f_agent_version_howsign(version: Any, path: Any, cmd: Any): String = Tr.f(2797, arrayOf<Any>(version, path, cmd))
+  val gpui_f_not_installed: String get() = Tr.s(2798)
+  val gpui_f_or_terminal: String get() = Tr.s(2799)
+  fun gpui_f_no_install_button(cmd: Any): String = Tr.f(2800, arrayOf<Any>(cmd))
+  val gpui_f_check_again: String get() = Tr.s(2801)
+  val gpui_f_check_again_note: String get() = Tr.s(2802)
+  val gpui_f_check_again_one: String get() = Tr.s(2803)
+  val gpui_f_claude_title: String get() = Tr.s(2804)
+  val gpui_f_claude_body: String get() = Tr.s(2805)
+  val gpui_f_codex_title: String get() = Tr.s(2806)
+  val gpui_f_codex_body: String get() = Tr.s(2807)
+  val gpui_f_others_title: String get() = Tr.s(2808)
+  val gpui_f_others_body: String get() = Tr.s(2809)
+  fun gpui_f_tool_runs(name: Any, version: Any, path: Any): String = Tr.f(2810, arrayOf<Any>(name, version, path))
+  fun gpui_f_tool_broken(path: Any, why: Any): String = Tr.f(2811, arrayOf<Any>(path, why))
+  fun gpui_f_tool_notfound(name: Any): String = Tr.f(2812, arrayOf<Any>(name))
+  val gpui_f_kicad_body: String get() = Tr.s(2813)
+  fun gpui_f_kicad_ok_v(version: Any, cli: Any): String = Tr.f(2814, arrayOf<Any>(version, cli))
+  fun gpui_f_kicad_ok(cli: Any): String = Tr.f(2815, arrayOf<Any>(cli))
+  val gpui_f_releases: String get() = Tr.s(2816)
+  fun gpui_f_kicad_auto(version: Any): String = Tr.f(2817, arrayOf<Any>(version))
+  fun gpui_f_kicad_offer_stock_v(version: Any): String = Tr.f(2818, arrayOf<Any>(version))
+  val gpui_f_kicad_offer_stock: String get() = Tr.s(2819)
+  fun gpui_f_kicad_offer_old_v(version: Any): String = Tr.f(2820, arrayOf<Any>(version))
+  val gpui_f_kicad_offer_old: String get() = Tr.s(2821)
+  fun gpui_f_kicad_offer_broken_v(version: Any): String = Tr.f(2822, arrayOf<Any>(version))
+  val gpui_f_kicad_offer_broken: String get() = Tr.s(2823)
+  fun gpui_f_kicad_nopackage(computer: Any): String = Tr.f(2824, arrayOf<Any>(computer))
+  fun gpui_f_kicad_found_stock_v(version: Any, cli: Any): String = Tr.f(2825, arrayOf<Any>(version, cli))
+  fun gpui_f_kicad_found_stock(cli: Any): String = Tr.f(2826, arrayOf<Any>(cli))
+  fun gpui_f_kicad_found_v(version: Any, cli: Any): String = Tr.f(2827, arrayOf<Any>(version, cli))
+  fun gpui_f_kicad_found_plain(cli: Any): String = Tr.f(2828, arrayOf<Any>(cli))
+  val gpui_f_kicad_found: String get() = Tr.s(2829)
+  val gpui_f_stock_kicad: String get() = Tr.s(2830)
+  val gpui_f_stock_kicad_note: String get() = Tr.s(2831)
+  val gpui_f_download_kicad: String get() = Tr.s(2832)
+  val gpui_f_locate: String get() = Tr.s(2833)
+  val gpui_f_locate_kicad: String get() = Tr.s(2834)
+  val gpui_f_use_path: String get() = Tr.s(2835)
+  val gpui_f_hint_kicad: String get() = Tr.s(2836)
+  val gpui_f_freecad_body: String get() = Tr.s(2837)
+  val gpui_f_locate_freecad: String get() = Tr.s(2838)
+  val gpui_f_hint_freecad: String get() = Tr.s(2839)
+  val gpui_f_debian: String get() = Tr.s(2840)
+  val gpui_f_local_code: String get() = Tr.s(2841)
+  val gpui_f_only_this: String get() = Tr.s(2842)
+  val gpui_f_machine_title: String get() = Tr.s(2843)
+  val gpui_f_machine_body: String get() = Tr.s(2844)
+  val gpui_f_ts_on: String get() = Tr.s(2845)
+  val gpui_f_ts_off: String get() = Tr.s(2846)
+  val gpui_f_ts_none: String get() = Tr.s(2847)
+  val gpui_f_linked_machines: String get() = Tr.s(2848)
+  val gpui_f_none_yet: String get() = Tr.s(2849)
+  fun gpui_f_n_linked(n: Number): String = Tr.f(2850, arrayOf<Any>(n))
+  val gpui_f_phone_title: String get() = Tr.s(2851)
+  val gpui_f_phone_body: String get() = Tr.s(2852)
+  val gpui_f_pairing_link: String get() = Tr.s(2853)
+  val gpui_f_make_another: String get() = Tr.s(2854)
+  fun gpui_f_short_code(code: Any): String = Tr.f(2855, arrayOf<Any>(code))
+  val gpui_f_add_device: String get() = Tr.s(2856)
+  fun gpui_f_invite_failed(e: Any): String = Tr.f(2857, arrayOf<Any>(e))
+  val gpui_f_invite_note: String get() = Tr.s(2858)
+  val gpui_f_show_qr: String get() = Tr.s(2859)
+  val gpui_f_android_app: String get() = Tr.s(2860)
+  val gpui_f_android_note: String get() = Tr.s(2861)
+  val gpui_f_download_apk: String get() = Tr.s(2862)
+  val gpui_f_iphone_app: String get() = Tr.s(2863)
+  val gpui_f_iphone_note: String get() = Tr.s(2864)
+  val gpui_f_ts_phone: String get() = Tr.s(2865)
+  val gpui_f_ts_phone_note: String get() = Tr.s(2866)
+  val gpui_f_app_store: String get() = Tr.s(2867)
+  val gpui_f_google_play: String get() = Tr.s(2868)
+  val gpui_f_paired_devices: String get() = Tr.s(2869)
+  fun gpui_f_n_paired(n: Number): String = Tr.f(2870, arrayOf<Any>(n))
+  val gpui_f_remote_title: String get() = Tr.s(2871)
+  val gpui_f_cont_on: String get() = Tr.s(2872)
+  val gpui_f_cont_off: String get() = Tr.s(2873)
+  val gpui_f_remote_body_package: String get() = Tr.s(2874)
+  fun gpui_f_remote_body_channel(channel: Any): String = Tr.f(2875, arrayOf<Any>(channel))
+  val gpui_f_cont_restart: String get() = Tr.s(2876)
+  val gpui_f_open_page: String get() = Tr.s(2877)
+  val gpui_f_open_page_note: String get() = Tr.s(2878)
+  val gpui_f_network_updates: String get() = Tr.s(2879)
+  val gpui_f_project_title: String get() = Tr.s(2880)
+  val gpui_f_project_body: String get() = Tr.s(2881)
+  val gpui_f_add_another: String get() = Tr.s(2882)
+  val gpui_f_path_folder: String get() = Tr.s(2883)
+  val gpui_f_add_project: String get() = Tr.s(2884)
+  val gpui_f_create_project: String get() = Tr.s(2885)
+  val gpui_f_full_path: String get() = Tr.s(2886)
+  val gpui_f_thread_title: String get() = Tr.s(2887)
+  val gpui_f_thread_body: String get() = Tr.s(2888)
+  fun gpui_f_new_thread_in(project: Any): String = Tr.f(2889, arrayOf<Any>(project))
+  val gpui_f_new_thread_note: String get() = Tr.s(2890)
+  val gpui_f_start_thread: String get() = Tr.s(2891)
+  val gpui_f_first_message: String get() = Tr.s(2892)
+  val gpui_f_project_first: String get() = Tr.s(2893)
+  val gpui_f_go_project: String get() = Tr.s(2894)
+  fun gpui_f_n_so_far(n: Number): String = Tr.f(2895, arrayOf<Any>(n))
+  val gpui_f_tour_viewers: String get() = Tr.s(2896)
+  val gpui_f_tour_viewers_body: String get() = Tr.s(2897)
+  val gpui_f_key_side: String get() = Tr.s(2898)
+  val gpui_f_key_diff: String get() = Tr.s(2899)
+  val gpui_f_tour_threed: String get() = Tr.s(2900)
+  val gpui_f_tour_threed_body: String get() = Tr.s(2901)
+  val gpui_f_key_threed: String get() = Tr.s(2902)
+  val gpui_f_tour_mech: String get() = Tr.s(2903)
+  val gpui_f_tour_mech_body: String get() = Tr.s(2904)
+  val gpui_f_tour_browser_body: String get() = Tr.s(2905)
+  val gpui_f_tour_thread: String get() = Tr.s(2906)
+  fun gpui_f_tour_thread_body(m: Any): String = Tr.f(2907, arrayOf<Any>(m))
+  val gpui_f_tour_bots_body: String get() = Tr.s(2908)
+  val gpui_f_make_bot: String get() = Tr.s(2909)
+  val gpui_f_opens_form: String get() = Tr.s(2910)
+  val gpui_f_new_bot: String get() = Tr.s(2911)
+  val gpui_f_tour_space: String get() = Tr.s(2912)
+  val gpui_f_tour_space_body: String get() = Tr.s(2913)
+  val gpui_f_tour_rooms_body: String get() = Tr.s(2914)
+  val gpui_f_make_room: String get() = Tr.s(2915)
+  val gpui_f_new_room: String get() = Tr.s(2916)
+  val gpui_f_tour_routines_body: String get() = Tr.s(2917)
+  val gpui_f_tour_palette: String get() = Tr.s(2918)
+  fun gpui_f_tour_palette_body(m: Any): String = Tr.f(2919, arrayOf<Any>(m))
+  val gpui_f_key_agent: String get() = Tr.s(2920)
+  val gpui_f_key_prevnext: String get() = Tr.s(2921)
+  fun gpui_f_key_prevnext_keys(m: Any): String = Tr.f(2922, arrayOf<Any>(m))
+  val gpui_f_key_uber: String get() = Tr.s(2923)
+  val gpui_f_try_it: String get() = Tr.s(2924)
+  val gpui_f_try_palette: String get() = Tr.s(2925)
+  val gpui_f_open_palette: String get() = Tr.s(2926)
+  val gpui_f_try_settings: String get() = Tr.s(2927)
+  val gpui_f_open_settings: String get() = Tr.s(2928)
+  fun gpui_f_tour_settings_body(pages: Any): String = Tr.f(2929, arrayOf<Any>(pages))
+  val gpui_f_uber_title: String get() = Tr.s(2930)
+  fun gpui_f_uber_is(name: Any): String = Tr.f(2931, arrayOf<Any>(name))
+  val gpui_f_uber_pick: String get() = Tr.s(2932)
+  val gpui_f_uber_create: String get() = Tr.s(2933)
+  fun gpui_f_uber_make(name: Any): String = Tr.f(2934, arrayOf<Any>(name))
+  val gpui_f_uber_create_btn: String get() = Tr.s(2935)
+  val gpui_f_all_set: String get() = Tr.s(2936)
+  val gpui_f_still_open: String get() = Tr.s(2937)
+  val gpui_f_skipped_dot: String get() = Tr.s(2938)
+  val gpui_f_not_done_dot: String get() = Tr.s(2939)
+  val gpui_f_skipped: String get() = Tr.s(2940)
+  val gpui_f_not_done: String get() = Tr.s(2941)
+  val gpui_f_setup_finished: String get() = Tr.s(2942)
+  fun gpui_f_setup_finished_note(d: Number, n: Number): String = Tr.f(2943, arrayOf<Any>(d, n))
+  val gpui_f_run_again: String get() = Tr.s(2944)
+  val gpui_f_setup_unfinished: String get() = Tr.s(2945)
+  val gpui_f_resume: String get() = Tr.s(2946)
+  val gpui_f_start_again: String get() = Tr.s(2947)
+  val gpui_f_setup_note: String get() = Tr.s(2948)
+  val gpui_f_run_setup: String get() = Tr.s(2949)
+  val gpui_f_name_bpkicad: String get() = Tr.s(2950)
+  val gpui_f_name_kicad: String get() = Tr.s(2951)
+  val gpui_f_name_freecad: String get() = Tr.s(2952)
+  val gpui_f_name_claude: String get() = Tr.s(2953)
+  val gpui_f_name_codex: String get() = Tr.s(2954)
+  val gpui_f_name_grok: String get() = Tr.s(2955)
+  val gpui_f_name_muse: String get() = Tr.s(2956)
+  val gpui_f_name_opencode: String get() = Tr.s(2957)
+  val gpui_f_name_pi: String get() = Tr.s(2958)
+  val gpui_f_name_omp: String get() = Tr.s(2959)
+  val gpui_f_name_fedora: String get() = Tr.s(2960)
+  val gpui_f_name_arch: String get() = Tr.s(2961)
+  val gpui_f_name_homebrew: String get() = Tr.s(2962)
+  val gpui_f_name_winget: String get() = Tr.s(2963)
+  fun gpui_f_fold_tools(n: Number, tools: Any): String = Tr.f(2964, arrayOf<Any>(n, tools))
+  fun gpui_f_fold_tools_steps(n: Number, tools: Any, d: Number): String = Tr.f(2965, arrayOf<Any>(n, tools, d))
+  fun gpui_f_fold_steps(n: Number, d: Number): String = Tr.f(2966, arrayOf<Any>(n, d))
+  fun gpui_f_fold_live(n: Number, what: Any): String = Tr.f(2967, arrayOf<Any>(n, what))
+  fun gpui_f_fold_live_steps(n: Number, d: Number, what: Any): String = Tr.f(2968, arrayOf<Any>(n, d, what))
+  val gpui_f_restart: String get() = Tr.s(2969)
+  val gpui_f_not_read: String get() = Tr.s(2970)
+  val gpui_f_needs: String get() = Tr.s(2971)
+  fun gpui_f_needs_head(head: Any): String = Tr.f(2972, arrayOf<Any>(head))
+  val gpui_f_type_here: String get() = Tr.s(2973)
+  val gpui_f_or_type: String get() = Tr.s(2974)
+  val gpui_f_quote_files: String get() = Tr.s(2975)
+  val gpui_f_dictate: String get() = Tr.s(2976)
+  val gpui_f_inactive: String get() = Tr.s(2977)
+  fun gpui_f_tool_runs_nover(name: Any, path: Any): String = Tr.f(2978, arrayOf<Any>(name, path))
+  val gpui_f2_aon_boat_learn: String get() = Tr.s(2979)
+  val gpui_f2_uberbot_what: String get() = Tr.s(2980)
+  val gpui_acct_account_name_optional: String get() = Tr.s(2981)
+  val gpui_follow_button: String get() = Tr.s(2982)
+  val gpui_follow_button_tip: String get() = Tr.s(2983)
+  fun gpui_follow_route(page: Any, net: Any, near: Any): String = Tr.f(2984, arrayOf<Any>(page, net, near))
+  fun gpui_follow_edit(page: Any, what: Any): String = Tr.f(2985, arrayOf<Any>(page, what))
+  fun gpui_follow_near(ref: Any): String = Tr.f(2986, arrayOf<Any>(ref))
+  val gpui_follow_wait: String get() = Tr.s(2987)
+  val gpui_follow_paused: String get() = Tr.s(2988)
+  val gpui_follow_resume: String get() = Tr.s(2989)
+  fun gpui_follow_held(page: Any): String = Tr.f(2990, arrayOf<Any>(page))
+  val android_mgmt_all: String get() = Tr.s(2991)
+  val android_mgmt_judged: String get() = Tr.s(2992)
+  val android_mgmt_fix: String get() = Tr.s(2993)
+  val android_mgmt_sent: String get() = Tr.s(2994)
+  val android_mcp: String get() = Tr.s(2995)
+  val android_alerts_ask: String get() = Tr.s(2996)
+  val android_alerts_allow: String get() = Tr.s(2997)
+  val android_alerts_later: String get() = Tr.s(2998)
+  val android_viewerbg: String get() = Tr.s(2999)
+  val android_viewerbg_auto: String get() = Tr.s(3000)
+  val android_viewerbg_light: String get() = Tr.s(3001)
+  val android_viewerbg_dark: String get() = Tr.s(3002)
+  val android_viewerbg_custom: String get() = Tr.s(3003)
+  val android_viewerbg_hex: String get() = Tr.s(3004)
+  val android_viewerbg_note: String get() = Tr.s(3005)
+  val android_state_working: String get() = Tr.s(3006)
+  val android_state_inactive: String get() = Tr.s(3007)
+  val android_state_finished: String get() = Tr.s(3008)
+  val android_state_settled: String get() = Tr.s(3009)
+  val android_state_stalled: String get() = Tr.s(3010)
+  val android_state_monitoring: String get() = Tr.s(3011)
+  val android_ago_now: String get() = Tr.s(3012)
+  fun android_ago_m(n: Any): String = Tr.f(3013, arrayOf<Any>(n))
+  fun android_ago_h(n: Any): String = Tr.f(3014, arrayOf<Any>(n))
+  fun android_ago_d(n: Any): String = Tr.f(3015, arrayOf<Any>(n))
+  val android_room_gone: String get() = Tr.s(3016)
+  fun android_conn_connecting(hub: Any): String = Tr.f(3017, arrayOf<Any>(hub))
+  val android_conn_offline: String get() = Tr.s(3018)
+  val android_hub: String get() = Tr.s(3019)
+  val android_hub_add: String get() = Tr.s(3020)
+  val android_pair_repair: String get() = Tr.s(3021)
+  val android_pair_revoked: String get() = Tr.s(3022)
+  val android_pair_paste: String get() = Tr.s(3023)
+  val android_pair_photo: String get() = Tr.s(3024)
+  val android_pair_other: String get() = Tr.s(3025)
+  val android_pair_code_lead: String get() = Tr.s(3026)
+  val android_pair_code: String get() = Tr.s(3027)
+  val android_pair_code_bad: String get() = Tr.s(3028)
+  val android_pair_link_bad: String get() = Tr.s(3029)
+  val android_pair_ask: String get() = Tr.s(3030)
+  val android_pair_ask_note: String get() = Tr.s(3031)
+  val android_terminals: String get() = Tr.s(3032)
+  val android_search_hint: String get() = Tr.s(3033)
+  val android_projects_none: String get() = Tr.s(3034)
+  val android_project_add: String get() = Tr.s(3035)
+  val android_kind_uberbot: String get() = Tr.s(3036)
+  val android_kind_bot: String get() = Tr.s(3037)
+  val android_kind_room: String get() = Tr.s(3038)
+  fun android_thread_new_in(project: Any): String = Tr.f(3039, arrayOf<Any>(project))
+  val android_threads_none: String get() = Tr.s(3040)
+  fun android_kids_hide(n: Number): String = Tr.f(3041, arrayOf<Any>(n))
+  fun android_kids_show(n: Number): String = Tr.f(3042, arrayOf<Any>(n))
+  fun android_work_head(word: Any): String = Tr.f(3043, arrayOf<Any>(word))
+  fun android_lock_waiting(n: Any): String = Tr.f(3044, arrayOf<Any>(n))
+  val android_state_head: String get() = Tr.s(3045)
+  val android_unsettle: String get() = Tr.s(3046)
+  val android_mic_off: String get() = Tr.s(3047)
+  val android_picture_bad: String get() = Tr.s(3048)
+  val android_buy_failed: String get() = Tr.s(3049)
+  val android_photo_bad: String get() = Tr.s(3050)
+  val android_camera_failed: String get() = Tr.s(3051)
+  val android_camera_off: String get() = Tr.s(3052)
+  val android_message_gone: String get() = Tr.s(3053)
+  val android_load_earlier: String get() = Tr.s(3054)
+  val android_thread_empty: String get() = Tr.s(3055)
+  val android_composer_hint: String get() = Tr.s(3056)
+  val android_pictures_old: String get() = Tr.s(3057)
+  val android_photo_choose: String get() = Tr.s(3058)
+  val android_photo_take: String get() = Tr.s(3059)
+  val android_failed_generic: String get() = Tr.s(3060)
+  val android_secret_new: String get() = Tr.s(3061)
+  fun android_secret_named(name: Any): String = Tr.f(3062, arrayOf<Any>(name))
+  val android_secret_paste: String get() = Tr.s(3063)
+  val android_secret_refused: String get() = Tr.s(3064)
+  val android_secret_notneeded: String get() = Tr.s(3065)
+  val android_send_retry: String get() = Tr.s(3066)
+  val android_ask_open: String get() = Tr.s(3067)
+  val android_ask_done: String get() = Tr.s(3068)
+  val android_ask_answer: String get() = Tr.s(3069)
+  fun android_ask_answered(answer: Any): String = Tr.f(3070, arrayOf<Any>(answer))
+  val android_hub_use: String get() = Tr.s(3071)
+  val native_hub_home: String get() = Tr.s(3072)
+  val native_hub_unreachable: String get() = Tr.s(3073)
+  val android_online: String get() = Tr.s(3074)
+  fun android_offline(why: Any): String = Tr.f(3075, arrayOf<Any>(why))
+  val android_accounts: String get() = Tr.s(3076)
+  fun android_hub_forget_ask(hub: Any): String = Tr.f(3077, arrayOf<Any>(hub))
+  val android_hub_forget_note: String get() = Tr.s(3078)
+  val android_improve: String get() = Tr.s(3079)
+  val android_alerts_head: String get() = Tr.s(3080)
+  val android_alerts_note: String get() = Tr.s(3081)
+  val android_quiet_head: String get() = Tr.s(3082)
+  fun android_quiet_range(from: Any, to: Any): String = Tr.f(3083, arrayOf<Any>(from, to))
+  val android_urgent_head: String get() = Tr.s(3084)
+  val android_quiet_note: String get() = Tr.s(3085)
+  val android_unpair: String get() = Tr.s(3086)
+  val android_updates_head: String get() = Tr.s(3087)
+  val android_option_beta: String get() = Tr.s(3088)
+  val android_folder_use: String get() = Tr.s(3089)
+  fun android_thread_new_title(project: Any): String = Tr.f(3090, arrayOf<Any>(project))
+  val android_thread_new_hint: String get() = Tr.s(3091)
+  val android_start: String get() = Tr.s(3092)
+  val android_improve_ask: String get() = Tr.s(3093)
+  val android_improve_note: String get() = Tr.s(3094)
+  val android_improve_github: String get() = Tr.s(3095)
+  val android_project_head: String get() = Tr.s(3096)
+  val android_improve_thread: String get() = Tr.s(3097)
+  val android_improve_sent: String get() = Tr.s(3098)
+  val android_order_head: String get() = Tr.s(3099)
+  fun android_order_named(name: Any): String = Tr.f(3100, arrayOf<Any>(name))
+  val android_buy_now: String get() = Tr.s(3101)
+  val android_design_change: String get() = Tr.s(3102)
+  val android_live_working: String get() = Tr.s(3103)
+  fun android_live_count(n: Number): String = Tr.f(3104, arrayOf<Any>(n))
+  val android_connecting: String get() = Tr.s(3105)
+  val android_hub_unreachable: String get() = Tr.s(3106)
+  val android_pair_code_address: String get() = Tr.s(3107)
+  val android_pair_link_partial: String get() = Tr.s(3108)
+  val android_pair_link_none: String get() = Tr.s(3109)
+  fun android_fail_http(code: Any): String = Tr.f(3110, arrayOf<Any>(code))
+  fun android_fail_reach(hub: Any): String = Tr.f(3111, arrayOf<Any>(hub))
+  fun android_fail_timeout(hub: Any): String = Tr.f(3112, arrayOf<Any>(hub))
+  fun android_fail_dns(hub: Any): String = Tr.f(3113, arrayOf<Any>(hub))
+  val android_offline_word: String get() = Tr.s(3114)
+  val android_offline_cap: String get() = Tr.s(3115)
+  val android_proto_old: String get() = Tr.s(3116)
+  val android_hub_refused: String get() = Tr.s(3117)
+  val android_hub_noanswer: String get() = Tr.s(3118)
+  val android_thinking: String get() = Tr.s(3119)
+  val android_buy_it: String get() = Tr.s(3120)
+  val android_layers: String get() = Tr.s(3121)
+  val android_link_old: String get() = Tr.s(3122)
+  val android_link_nohere: String get() = Tr.s(3123)
+  val android_link_failed: String get() = Tr.s(3124)
+  val android_link_offline: String get() = Tr.s(3125)
+  val android_copied: String get() = Tr.s(3126)
+  fun android_history_title(n: Any): String = Tr.f(3127, arrayOf<Any>(n))
+  fun android_settled_title(n: Any): String = Tr.f(3128, arrayOf<Any>(n))
+  val android_dictate: String get() = Tr.s(3129)
+  val android_voice_spelling: String get() = Tr.s(3130)
+  val android_voice_head: String get() = Tr.s(3131)
+  val android_link_noapp: String get() = Tr.s(3132)
+  val android_star: String get() = Tr.s(3133)
+  val android_rescue_restart: String get() = Tr.s(3134)
+  val android_rescue_pairing: String get() = Tr.s(3135)
+  val android_rescue_asking: String get() = Tr.s(3136)
+  val android_rescue_norestart: String get() = Tr.s(3137)
+  val android_rescue_nostatus: String get() = Tr.s(3138)
+  val android_rescue_sent: String get() = Tr.s(3139)
+  val android_rescue_refused: String get() = Tr.s(3140)
+  val android_rescue_old: String get() = Tr.s(3141)
+  val android_rescue_unreachable: String get() = Tr.s(3142)
+  val android_rescue_noanswer: String get() = Tr.s(3143)
+  fun android_rescue_still(status: Any): String = Tr.f(3144, arrayOf<Any>(status))
+  val android_rescue_waiting: String get() = Tr.s(3145)
+  fun android_rescue_is(status: Any): String = Tr.f(3146, arrayOf<Any>(status))
+  val android_rescue_down: String get() = Tr.s(3147)
+  val android_rescue_safedegraded: String get() = Tr.s(3148)
+  val android_rescue_degraded: String get() = Tr.s(3149)
+  val android_rescue_safe: String get() = Tr.s(3150)
+  val android_rescue_up: String get() = Tr.s(3151)
+  val android_pair_local: String get() = Tr.s(3152)
+  val android_pair_wrong: String get() = Tr.s(3153)
+  val android_pair_expired: String get() = Tr.s(3154)
+  val android_pair_used: String get() = Tr.s(3155)
+  val android_pair_revokedcode: String get() = Tr.s(3156)
+  val android_pair_limited: String get() = Tr.s(3157)
+  val android_pair_required: String get() = Tr.s(3158)
+  val android_pair_unreachable: String get() = Tr.s(3159)
+  val android_pad_pen_hint: String get() = Tr.s(3160)
+  val android_pad_box_hint: String get() = Tr.s(3161)
+  val android_pad_eraser_hint: String get() = Tr.s(3162)
+  val android_pad_pen: String get() = Tr.s(3163)
+  val android_pad_box: String get() = Tr.s(3164)
+  val android_pad_eraser: String get() = Tr.s(3165)
+  val android_pad_paper: String get() = Tr.s(3166)
+  val android_undo: String get() = Tr.s(3167)
+  val android_pad_length: String get() = Tr.s(3168)
+  val android_machines_head: String get() = Tr.s(3169)
+  val android_devices_head: String get() = Tr.s(3170)
+  val android_mic_failed: String get() = Tr.s(3171)
+  val android_dictation_failed: String get() = Tr.s(3172)
+  val android_paste: String get() = Tr.s(3173)
+  val android_term_copy: String get() = Tr.s(3174)
+  fun android_terminals_in(project: Any): String = Tr.f(3175, arrayOf<Any>(project))
+  val android_term_new: String get() = Tr.s(3176)
+  val android_terms_none: String get() = Tr.s(3177)
+  val android_term_failed: String get() = Tr.s(3178)
+  fun android_term_exited(code: Any): String = Tr.f(3179, arrayOf<Any>(code))
+  val android_term_kind_shell: String get() = Tr.s(3180)
+  fun android_mesh_previous(why: Any): String = Tr.f(3181, arrayOf<Any>(why))
+  val android_mesh_decoding: String get() = Tr.s(3182)
+  val android_mesh_bad: String get() = Tr.s(3183)
+  val android_viewer_a11y: String get() = Tr.s(3184)
+  val android_search_inthread: String get() = Tr.s(3185)
+  val android_thread_detach: String get() = Tr.s(3186)
+  val android_delete_more: String get() = Tr.s(3187)
+  val android_thread_rename: String get() = Tr.s(3188)
+  fun android_thread_delete_ask(title: Any): String = Tr.f(3189, arrayOf<Any>(title))
+  val android_thread_delete: String get() = Tr.s(3190)
+  val android_keep: String get() = Tr.s(3191)
+  val android_badge_more: String get() = Tr.s(3192)
+  val android_project_remove_more: String get() = Tr.s(3193)
+  val android_project_rename: String get() = Tr.s(3194)
+  fun android_project_remove_ask(title: Any): String = Tr.f(3195, arrayOf<Any>(title))
+  val android_searching: String get() = Tr.s(3196)
+  fun android_search_none(q: Any): String = Tr.f(3197, arrayOf<Any>(q))
+  fun android_search_project(title: Any): String = Tr.f(3198, arrayOf<Any>(title))
+  val android_history_head: String get() = Tr.s(3199)
+  val android_done: String get() = Tr.s(3200)
+  val android_you: String get() = Tr.s(3201)
+  val android_agent: String get() = Tr.s(3202)
+  fun android_room_post_to(room: Any): String = Tr.f(3203, arrayOf<Any>(room))
+  val android_post: String get() = Tr.s(3204)
+  val android_find_head: String get() = Tr.s(3205)
+  val android_find_hint: String get() = Tr.s(3206)
+  fun android_find_none(q: Any): String = Tr.f(3207, arrayOf<Any>(q))
+  val android_accounts_none: String get() = Tr.s(3208)
+  val android_account_name_hint: String get() = Tr.s(3209)
+  val android_account_add: String get() = Tr.s(3210)
+  val android_account: String get() = Tr.s(3211)
+  val android_signin_open: String get() = Tr.s(3212)
+  val android_copy_code: String get() = Tr.s(3213)
+  val android_code_paste: String get() = Tr.s(3214)
+  val android_code_send: String get() = Tr.s(3215)
+  val android_viewer_split: String get() = Tr.s(3216)
+  fun android_viewer_title(title: Any): String = Tr.f(3217, arrayOf<Any>(title))
+  val android_viewer_board: String get() = Tr.s(3218)
+  val android_viewer_boards: String get() = Tr.s(3219)
+  val android_viewer_sheet: String get() = Tr.s(3220)
+  val android_viewer_sheets: String get() = Tr.s(3221)
+  fun android_viewer_sheets_n(n: Number): String = Tr.f(3222, arrayOf<Any>(n))
+  fun ios_viewer_sheets_n(n: Number): String = Tr.f(3223, arrayOf<Any>(n))
+  val android_viewer_change: String get() = Tr.s(3224)
+  val android_viewer_find: String get() = Tr.s(3225)
+  val android_viewer_noboard: String get() = Tr.s(3226)
+  val android_viewer_nosch: String get() = Tr.s(3227)
+  fun android_viewer_piece(at: Any): String = Tr.f(3228, arrayOf<Any>(at))
+  val android_viewer_loading3d: String get() = Tr.s(3229)
+  val android_compare_close: String get() = Tr.s(3230)
+  val android_compare_none: String get() = Tr.s(3231)
+  val android_mech_none: String get() = Tr.s(3232)
+  val android_folder_empty: String get() = Tr.s(3233)
+  val android_file_bad: String get() = Tr.s(3234)
+  val android_file_noimage: String get() = Tr.s(3235)
+  fun android_file_nopreview(size: Any): String = Tr.f(3236, arrayOf<Any>(size))
+  val android_pdf_bad: String get() = Tr.s(3237)
+  fun android_pdf_page(n: Any, total: Any): String = Tr.f(3238, arrayOf<Any>(n, total))
+  val android_browser_takeover: String get() = Tr.s(3239)
+  val android_browser_keys: String get() = Tr.s(3240)
+  val android_browser_handback: String get() = Tr.s(3241)
+  val android_browser_page: String get() = Tr.s(3242)
+  val android_browser_none: String get() = Tr.s(3243)
+  val android_browser_driving: String get() = Tr.s(3244)
+  val android_changes_head: String get() = Tr.s(3245)
+  val android_diff_nogit: String get() = Tr.s(3246)
+  val android_diff_none: String get() = Tr.s(3247)
+  val android_checks_run: String get() = Tr.s(3248)
+  val android_nothing: String get() = Tr.s(3249)
+  val android_comments_none: String get() = Tr.s(3250)
+  val android_resolved: String get() = Tr.s(3251)
+  val android_reopen: String get() = Tr.s(3252)
+  val android_resolve: String get() = Tr.s(3253)
+  val android_comment_hint: String get() = Tr.s(3254)
+  fun android_probe_lit(n: Any): String = Tr.f(3255, arrayOf<Any>(n))
+  fun android_fold_running(what: Any): String = Tr.f(3256, arrayOf<Any>(what))
+  val android_hub_voice_unsupported_here: String get() = Tr.s(3257)
+  val android_hub_voice_mic_note_plain: String get() = Tr.s(3258)
+  fun android_hub_voice_mic_note_default(device: Any): String = Tr.f(3259, arrayOf<Any>(device))
+  fun android_hub_voice_mic_note(device: Any): String = Tr.f(3260, arrayOf<Any>(device))
+  val android_hub_voice_engine_pending: String get() = Tr.s(3261)
+  val android_hub_voice_dict_empty: String get() = Tr.s(3262)
+  val android_hub_voice_learned_empty: String get() = Tr.s(3263)
+  val android_hub_voice_pebble: String get() = Tr.s(3264)
+  val android_hub_voice_pebble_note: String get() = Tr.s(3265)
+  val android_hub_voice_noaudio_mic: String get() = Tr.s(3266)
+  val android_hub_voice_silent_mic: String get() = Tr.s(3267)
+  val android_hub_voice_skip: String get() = Tr.s(3268)
+  fun android_hub_voice_heard_many(word: Any, count: Any): String = Tr.f(3269, arrayOf<Any>(word, count))
+  fun android_hub_voice_dropped(heard: Any): String = Tr.f(3270, arrayOf<Any>(heard))
+  val android_hub_voice_err_copy: String get() = Tr.s(3271)
+  val android_hub_voice_err_busy: String get() = Tr.s(3272)
+  val android_hub_voice_err_setting: String get() = Tr.s(3273)
+  val android_hub_voice_err_action: String get() = Tr.s(3274)
+  val android_hub_voice_err_request: String get() = Tr.s(3275)
+  val android_hub_voice_err_term: String get() = Tr.s(3276)
+  val android_hub_voice_err_key: String get() = Tr.s(3277)
+  val android_hub_voice_err_write: String get() = Tr.s(3278)
+  val android_hub_voice_err_start: String get() = Tr.s(3279)
+  val android_hub_voice_err_stopped: String get() = Tr.s(3280)
+  val android_hub_voice_err_missing: String get() = Tr.s(3281)
+  fun android_hub_entry_step_files(files: Any): String = Tr.f(3282, arrayOf<Any>(files))
+  fun android_hub_entry_step_base(files: Any): String = Tr.f(3283, arrayOf<Any>(files))
+  val android_hub_entry_noreason: String get() = Tr.s(3284)
+  val android_hub_entry_retired: String get() = Tr.s(3285)
+  fun android_hub_viewer_layer(name: Any): String = Tr.f(3286, arrayOf<Any>(name))
+  val android_hub_viewer_pads: String get() = Tr.s(3287)
+  val android_hub_viewer_vias: String get() = Tr.s(3288)
+  val android_hub_viewer_holes: String get() = Tr.s(3289)
+  val android_hub_viewer_margin: String get() = Tr.s(3290)
+  val android_hub_viewer_sch_page: String get() = Tr.s(3291)
+  val android_hub_viewer_sch_sheetfill: String get() = Tr.s(3292)
+  val android_hub_viewer_sch_bodyfill: String get() = Tr.s(3293)
+  val android_hub_viewer_sch_graphic: String get() = Tr.s(3294)
+  val android_hub_viewer_sch_note: String get() = Tr.s(3295)
+  val android_hub_viewer_sch_body: String get() = Tr.s(3296)
+  val android_hub_viewer_sch_pin: String get() = Tr.s(3297)
+  val android_hub_viewer_sch_pinname: String get() = Tr.s(3298)
+  val android_hub_viewer_sch_pinnumber: String get() = Tr.s(3299)
+  val android_hub_viewer_sch_field: String get() = Tr.s(3300)
+  val android_hub_viewer_sch_fieldother: String get() = Tr.s(3301)
+  val android_hub_viewer_sch_bus: String get() = Tr.s(3302)
+  val android_hub_viewer_sch_busentry: String get() = Tr.s(3303)
+  val android_hub_viewer_sch_wire: String get() = Tr.s(3304)
+  val android_hub_viewer_sch_noconnect: String get() = Tr.s(3305)
+  val android_hub_viewer_sch_junction: String get() = Tr.s(3306)
+  val android_hub_viewer_sch_sheetname: String get() = Tr.s(3307)
+  val android_hub_viewer_sch_sheetfile: String get() = Tr.s(3308)
+  val android_hub_viewer_sch_dnp: String get() = Tr.s(3309)
+  val android_hub_review_nokicad: String get() = Tr.s(3310)
+  val android_hub_review_wait: String get() = Tr.s(3311)
+  val android_hub_review_nosch: String get() = Tr.s(3312)
+  val android_hub_review_nofindings: String get() = Tr.s(3313)
+  fun android_hub_review_unticked(n: Any): String = Tr.f(3314, arrayOf<Any>(n))
+  fun android_hub_review_customfailed(n: Any): String = Tr.f(3315, arrayOf<Any>(n))
+  val android_hub_review_runthem: String get() = Tr.s(3316)
+  val android_hub_err_thread: String get() = Tr.s(3317)
+  val android_hub_err_project: String get() = Tr.s(3318)
+  val android_hub_err_room: String get() = Tr.s(3319)
+  val android_hub_err_method: String get() = Tr.s(3320)
+  val android_hub_err_attachment: String get() = Tr.s(3321)
+  val android_hub_err_noanswer: String get() = Tr.s(3322)
+  val android_hub_err_empty: String get() = Tr.s(3323)
+  val android_hub_err_oldapp: String get() = Tr.s(3324)
+  val android_hub_err_clientid: String get() = Tr.s(3325)
+  fun android_hub_err_images_max(n: Any): String = Tr.f(3326, arrayOf<Any>(n))
+  val android_hub_err_images_kind: String get() = Tr.s(3327)
+  val android_hub_err_images_base64: String get() = Tr.s(3328)
+  val android_hub_err_images_size: String get() = Tr.s(3329)
+  val android_hub_err_images_store: String get() = Tr.s(3330)
+  val android_hub_err_folder_none: String get() = Tr.s(3331)
+  val android_hub_err_folder_read: String get() = Tr.s(3332)
+  val android_hub_err_notadded: String get() = Tr.s(3333)
+  val android_hub_err_nothread: String get() = Tr.s(3334)
+  val android_hub_err_env: String get() = Tr.s(3335)
+  val android_hub_err_channel: String get() = Tr.s(3336)
+  val android_hub_err_topic: String get() = Tr.s(3337)
+  val android_hub_err_tint: String get() = Tr.s(3338)
+  val android_hub_err_usage: String get() = Tr.s(3339)
+  val android_hub_err_nofolder: String get() = Tr.s(3340)
+  val android_hub_err_path: String get() = Tr.s(3341)
+  val android_hub_err_layer: String get() = Tr.s(3342)
+  val android_hub_err_compare: String get() = Tr.s(3343)
+  val android_hub_err_version: String get() = Tr.s(3344)
+  val android_hub_err_repo: String get() = Tr.s(3345)
+  val android_hub_err_toolbar: String get() = Tr.s(3346)
+  val android_hub_err_page: String get() = Tr.s(3347)
+  val android_hub_err_term_none: String get() = Tr.s(3348)
+  val android_hub_err_term_off: String get() = Tr.s(3349)
+  val android_hub_err_term_stopped: String get() = Tr.s(3350)
+  val android_hub_err_term_many: String get() = Tr.s(3351)
+  val android_hub_err_term_much: String get() = Tr.s(3352)
+  val android_hub_err_term_base64: String get() = Tr.s(3353)
+  val android_hub_err_busy: String get() = Tr.s(3354)
+  val android_hub_err_store: String get() = Tr.s(3355)
+  val android_hub_err_noagent: String get() = Tr.s(3356)
+  val android_hub_err_project_choose: String get() = Tr.s(3357)
+  val android_hub_err_project_retry: String get() = Tr.s(3358)
+  val android_hub_err_project_message: String get() = Tr.s(3359)
+  fun android_hub_err_project_already(root: Any): String = Tr.f(3360, arrayOf<Any>(root))
+  fun android_hub_err_project_invalid(path: Any): String = Tr.f(3361, arrayOf<Any>(path))
+  val android_hub_err_project_nofolder: String get() = Tr.s(3362)
+  val android_hub_err_project_unavailable: String get() = Tr.s(3363)
+  val android_hub_err_project_home: String get() = Tr.s(3364)
+  val android_hub_err_folder_gone: String get() = Tr.s(3365)
+  val android_hub_err_notfolder: String get() = Tr.s(3366)
+  val android_hub_err_file: String get() = Tr.s(3367)
+  val android_hub_err_utf8: String get() = Tr.s(3368)
+  val android_hub_err_parent: String get() = Tr.s(3369)
+  val android_hub_err_conversation: String get() = Tr.s(3370)
+  val android_hub_err_account_move: String get() = Tr.s(3371)
+  val android_hub_err_account_turn: String get() = Tr.s(3372)
+  val android_hub_err_account_agent: String get() = Tr.s(3373)
+  val android_hub_err_account_changed: String get() = Tr.s(3374)
+  val android_hub_err_account_none: String get() = Tr.s(3375)
+  val android_hub_err_intent_reload: String get() = Tr.s(3376)
+  val android_hub_err_intent_saving: String get() = Tr.s(3377)
+  val android_hub_err_intent_dir: String get() = Tr.s(3378)
+  val android_hub_err_intent_section: String get() = Tr.s(3379)
+  val android_hub_err_order_off: String get() = Tr.s(3380)
+  val android_hub_err_order_changed: String get() = Tr.s(3381)
+  val android_hub_err_order_upload: String get() = Tr.s(3382)
+  val android_hub_err_machine: String get() = Tr.s(3383)
+  fun android_hub_devices_used_by(name: Any): String = Tr.f(3384, arrayOf<Any>(name))
+  val android_hub_devices_used: String get() = Tr.s(3385)
+  val android_hub_devices_revoked: String get() = Tr.s(3386)
+  fun android_hub_devices_expired(until: Any): String = Tr.f(3387, arrayOf<Any>(until))
+  fun android_hub_devices_invite_failed(error: Any): String = Tr.f(3388, arrayOf<Any>(error))
+  val android_hub_devices_add: String get() = Tr.s(3389)
+  val android_hub_devices_add_note: String get() = Tr.s(3390)
+  val android_hub_devices_retry: String get() = Tr.s(3391)
+  val android_hub_devices_lan: String get() = Tr.s(3392)
+  val android_hub_devices_lan_on: String get() = Tr.s(3393)
+  val android_hub_devices_lan_gone: String get() = Tr.s(3394)
+  fun android_hub_devices_lan_row(url: Any): String = Tr.f(3395, arrayOf<Any>(url))
+  val android_hub_devices_lan_stop: String get() = Tr.s(3396)
+  val android_hub_devices_link_open: String get() = Tr.s(3397)
+  val android_hub_devices_link_used: String get() = Tr.s(3398)
+  fun android_hub_devices_link_open_by(name: Any): String = Tr.f(3399, arrayOf<Any>(name))
+  fun android_hub_devices_link_used_by(name: Any): String = Tr.f(3400, arrayOf<Any>(name))
+  val android_hub_devices_kind_tailnet: String get() = Tr.s(3401)
+  val android_hub_devices_kind_local: String get() = Tr.s(3402)
+  val android_hub_devices_tailnet_note: String get() = Tr.s(3403)
+  val android_hub_devices_lan_note: String get() = Tr.s(3404)
+  val android_hub_devices_reach: String get() = Tr.s(3405)
+  val android_hub_devices_lan_address: String get() = Tr.s(3406)
+  val android_hub_devices_another: String get() = Tr.s(3407)
+  fun android_hub_devices_qrnote(code: Any, hub: Any, until: Any): String = Tr.f(3408, arrayOf<Any>(code, hub, until))
+  fun android_hub_devices_lan_offer(url: Any): String = Tr.f(3409, arrayOf<Any>(url))
+  val android_hub_devices_lan_let: String get() = Tr.s(3410)
+  val android_hub_devices_only: String get() = Tr.s(3411)
+  val android_hub_devices_local_only: String get() = Tr.s(3412)
+  fun android_hub_devices_local_choose(kinds: Any): String = Tr.f(3413, arrayOf<Any>(kinds))
+  fun android_hub_devices_lan_unknown(address: Any): String = Tr.f(3414, arrayOf<Any>(address))
+  val android_hub_devices_lan_copy: String get() = Tr.s(3415)
+  fun android_hub_devices_lan_taken(address: Any): String = Tr.f(3416, arrayOf<Any>(address))
+  val android_hub_devices_err_action: String get() = Tr.s(3417)
+  val android_hub_machines_none: String get() = Tr.s(3418)
+  fun android_hub_machines_paired(url: Any): String = Tr.f(3419, arrayOf<Any>(url))
+  fun android_hub_machines_notyours(url: Any): String = Tr.f(3420, arrayOf<Any>(url))
+  fun android_hub_machines_unpaired(url: Any): String = Tr.f(3421, arrayOf<Any>(url))
+  fun android_hub_machines_via(url: Any, via: Any): String = Tr.f(3422, arrayOf<Any>(url, via))
+  val android_hub_machines_rename: String get() = Tr.s(3423)
+  val android_hub_machines_rename_note: String get() = Tr.s(3424)
+  val android_hub_machines_rename_from: String get() = Tr.s(3425)
+  val android_hub_machines_rename_to: String get() = Tr.s(3426)
+  fun android_hub_machines_wants(name: Any): String = Tr.f(3427, arrayOf<Any>(name))
+  fun android_hub_machines_request(url: Any, check: Any, left: Any): String = Tr.f(3428, arrayOf<Any>(url, check, left))
+  val android_hub_machines_approve: String get() = Tr.s(3429)
+  fun android_hub_machines_waiting(check: Any): String = Tr.f(3430, arrayOf<Any>(check))
+  fun android_hub_machines_pairing(address: Any): String = Tr.f(3431, arrayOf<Any>(address))
+  fun android_hub_machines_status_linked(name: Any): String = Tr.f(3432, arrayOf<Any>(name))
+  fun android_hub_machines_status_refused(error: Any): String = Tr.f(3433, arrayOf<Any>(error))
+  fun android_hub_machines_found(url: Any): String = Tr.f(3434, arrayOf<Any>(url))
+  fun android_hub_machines_found_other(url: Any): String = Tr.f(3435, arrayOf<Any>(url))
+  val android_hub_machines_code_hint: String get() = Tr.s(3436)
+  val android_hub_machines_pair_title: String get() = Tr.s(3437)
+  val android_hub_machines_pair_note: String get() = Tr.s(3438)
+  val android_hub_machines_addr_hint: String get() = Tr.s(3439)
+  val android_hub_machines_code: String get() = Tr.s(3440)
+  val android_hub_machines_code_title: String get() = Tr.s(3441)
+  fun android_hub_machines_code_note(code: Any, address: Any, left: Any): String = Tr.f(3442, arrayOf<Any>(code, address, left))
+  val android_hub_machines_code_another: String get() = Tr.s(3443)
+  val android_hub_machines_make: String get() = Tr.s(3444)
+  val android_hub_machines_make_note: String get() = Tr.s(3445)
+  val android_hub_machines_err_link: String get() = Tr.s(3446)
+  val android_hub_machines_err_which: String get() = Tr.s(3447)
+  fun android_hub_machines_err_called(name: Any): String = Tr.f(3448, arrayOf<Any>(name))
+  fun android_hub_machines_err_taken(name: Any): String = Tr.f(3449, arrayOf<Any>(name))
+  val android_hub_machines_err_invite: String get() = Tr.s(3450)
+  val android_hub_machines_err_codes: String get() = Tr.s(3451)
+  val android_hub_machines_err_record: String get() = Tr.s(3452)
+  val android_hub_machines_err_expired_answered: String get() = Tr.s(3453)
+  val android_hub_machines_err_secret: String get() = Tr.s(3454)
+  val android_hub_machines_err_approval: String get() = Tr.s(3455)
+  val android_hub_machines_err_expired: String get() = Tr.s(3456)
+  val android_hub_machines_err_address: String get() = Tr.s(3457)
+  val android_hub_machines_err_nocode: String get() = Tr.s(3458)
+  val android_hub_machines_err_already: String get() = Tr.s(3459)
+  fun android_hub_machines_err_noanswer(address: Any): String = Tr.f(3460, arrayOf<Any>(address))
+  val android_hub_machines_err_nothing: String get() = Tr.s(3461)
+  val android_hub_machines_err_attempt: String get() = Tr.s(3462)
+  val android_hub_machines_err_invites: String get() = Tr.s(3463)
+  val android_hub_machines_err_invite_record: String get() = Tr.s(3464)
+  val android_hub_machines_err_invite_secret: String get() = Tr.s(3465)
+  val android_hub_machines_err_unusable: String get() = Tr.s(3466)
+  fun android_hub_machines_err_nolink(code: Any, body: Any): String = Tr.f(3467, arrayOf<Any>(code, body))
+  val android_hub_machines_err_notlinked: String get() = Tr.s(3468)
+  val android_hub_machines_err_nocodeback: String get() = Tr.s(3469)
+  fun android_hub_machines_err_nocodegiven(code: Any, body: Any): String = Tr.f(3470, arrayOf<Any>(code, body))
+  val android_hub_accounts_state_connected: String get() = Tr.s(3471)
+  val android_hub_accounts_state_expired: String get() = Tr.s(3472)
+  val android_hub_accounts_state_connecting: String get() = Tr.s(3473)
+  val android_hub_accounts_state_unchecked: String get() = Tr.s(3474)
+  val android_hub_accounts_state_none: String get() = Tr.s(3475)
+  fun android_hub_accounts_limit(window: Any, used: Any): String = Tr.f(3476, arrayOf<Any>(window, used))
+  fun android_hub_accounts_limit_resets(window: Any, used: Any, `when`: Any): String = Tr.f(3477, arrayOf<Any>(window, used, `when`))
+  fun android_hub_accounts_limit_stale(window: Any, used: Any): String = Tr.f(3478, arrayOf<Any>(window, used))
+  fun android_hub_accounts_limit_resets_stale(window: Any, used: Any, `when`: Any): String = Tr.f(3479, arrayOf<Any>(window, used, `when`))
+  fun android_hub_accounts_add(provider: Any): String = Tr.f(3480, arrayOf<Any>(provider))
+  val android_hub_accounts_note: String get() = Tr.s(3481)
+  val android_hub_accounts_signin_starting: String get() = Tr.s(3482)
+  val android_hub_accounts_signin_paste: String get() = Tr.s(3483)
+  val android_hub_accounts_signin_device: String get() = Tr.s(3484)
+  val android_hub_accounts_signin_done: String get() = Tr.s(3485)
+  val android_hub_accounts_signin_expired: String get() = Tr.s(3486)
+  val android_hub_accounts_signin_cancelled: String get() = Tr.s(3487)
+  val android_hub_accounts_signin_failed: String get() = Tr.s(3488)
+  val android_hub_accounts_act_cancel: String get() = Tr.s(3489)
+  val android_hub_accounts_act_again: String get() = Tr.s(3490)
+  val android_hub_accounts_act_signin: String get() = Tr.s(3491)
+  fun android_hub_accounts_remove_ask(label: Any): String = Tr.f(3492, arrayOf<Any>(label))
+  fun android_hub_accounts_hold_resets(`when`: Any): String = Tr.f(3493, arrayOf<Any>(`when`))
+  val android_hub_accounts_hold: String get() = Tr.s(3494)
+  fun android_hub_accounts_alert_expired(provider: Any): String = Tr.f(3495, arrayOf<Any>(provider))
+  fun android_hub_accounts_alert_needed(provider: Any, title: Any, why: Any): String = Tr.f(3496, arrayOf<Any>(provider, title, why))
+  val android_hub_accounts_msg_expired: String get() = Tr.s(3497)
+  val android_hub_accounts_msg_expired_long: String get() = Tr.s(3498)
+  val android_hub_accounts_msg_generic: String get() = Tr.s(3499)
+  val android_hub_accounts_msg_nolimits: String get() = Tr.s(3500)
+  val android_hub_accounts_msg_nowindows: String get() = Tr.s(3501)
+  val android_hub_accounts_msg_signin: String get() = Tr.s(3502)
+  val android_hub_accounts_msg_directory: String get() = Tr.s(3503)
+  val android_hub_accounts_fail_code: String get() = Tr.s(3504)
+  val android_hub_accounts_fail_network: String get() = Tr.s(3505)
+  val android_hub_accounts_fail_storage: String get() = Tr.s(3506)
+  val android_hub_accounts_fail_cli: String get() = Tr.s(3507)
+  val android_hub_accounts_fail_dir: String get() = Tr.s(3508)
+  val android_hub_accounts_fail_verify: String get() = Tr.s(3509)
+  val android_hub_accounts_code_incomplete: String get() = Tr.s(3510)
+  val android_hub_accounts_code_other: String get() = Tr.s(3511)
+  val android_hub_accounts_msg_unverified: String get() = Tr.s(3512)
+  val android_hub_accounts_msg_registry: String get() = Tr.s(3513)
+  val android_hub_accounts_msg_identity: String get() = Tr.s(3514)
+  val android_hub_accounts_msg_subscription: String get() = Tr.s(3515)
+  fun android_hub_accounts_msg_refused(reason: Any): String = Tr.f(3516, arrayOf<Any>(reason))
+  val android_hub_accounts_msg_toolarge: String get() = Tr.s(3517)
+  val android_hub_accounts_msg_closed: String get() = Tr.s(3518)
+  val android_hub_accounts_msg_timeout: String get() = Tr.s(3519)
+  val android_hub_accounts_msg_notusage: String get() = Tr.s(3520)
+  val android_hub_accounts_usage_unauthorized: String get() = Tr.s(3521)
+  val android_hub_accounts_usage_forbidden: String get() = Tr.s(3522)
+  val android_hub_accounts_usage_limited: String get() = Tr.s(3523)
+  fun android_hub_accounts_usage_code(code: Any): String = Tr.f(3524, arrayOf<Any>(code))
+  val android_hub_accounts_err_gone: String get() = Tr.s(3525)
+  val android_hub_accounts_err_provider: String get() = Tr.s(3526)
+  val android_hub_accounts_err_add: String get() = Tr.s(3527)
+  val android_hub_accounts_err_gate: String get() = Tr.s(3528)
+  val android_hub_accounts_err_default: String get() = Tr.s(3529)
+  val android_hub_accounts_err_busy: String get() = Tr.s(3530)
+  val android_hub_accounts_err_select: String get() = Tr.s(3531)
+  val android_hub_accounts_err_check: String get() = Tr.s(3532)
+  fun android_hub_accounts_err_called(name: Any): String = Tr.f(3533, arrayOf<Any>(name))
+  val android_hub_update_off: String get() = Tr.s(3534)
+  val android_hub_update_checking: String get() = Tr.s(3535)
+  fun android_hub_update_downloading(version: Any): String = Tr.f(3536, arrayOf<Any>(version))
+  fun android_hub_update_waiting(version: Any): String = Tr.f(3537, arrayOf<Any>(version))
+  fun android_hub_update_installing(version: Any): String = Tr.f(3538, arrayOf<Any>(version))
+  val android_hub_update_failed: String get() = Tr.s(3539)
+  fun android_hub_update_row(version: Any): String = Tr.f(3540, arrayOf<Any>(version))
+  fun android_hub_update_done(version: Any): String = Tr.f(3541, arrayOf<Any>(version))
+  fun android_hub_update_rolledback(version: Any): String = Tr.f(3542, arrayOf<Any>(version))
+  fun android_hub_update_rolledback_why(version: Any, why: Any): String = Tr.f(3543, arrayOf<Any>(version, why))
+  fun android_hub_update_notstarted(version: Any): String = Tr.f(3544, arrayOf<Any>(version))
+  val android_hub_update_turns: String get() = Tr.s(3545)
+  fun android_hub_update_err_feed(code: Any): String = Tr.f(3546, arrayOf<Any>(code))
+  val android_hub_update_err_unpack: String get() = Tr.s(3547)
+  val android_hub_update_err_newer: String get() = Tr.s(3548)
+  val android_hub_update_err_nokey: String get() = Tr.s(3549)
+  val android_hub_update_err_untrusted: String get() = Tr.s(3550)
+  val android_hub_update_err_other: String get() = Tr.s(3551)
+  val android_hub_update_err_version: String get() = Tr.s(3552)
+  val android_hub_update_err_channel_tag: String get() = Tr.s(3553)
+  val android_hub_update_err_channel: String get() = Tr.s(3554)
+  val android_hub_update_err_file: String get() = Tr.s(3555)
+  val android_hub_update_err_checksum_bad: String get() = Tr.s(3556)
+  val android_hub_update_err_size_range: String get() = Tr.s(3557)
+  val android_hub_update_err_empty: String get() = Tr.s(3558)
+  val android_hub_update_err_listing: String get() = Tr.s(3559)
+  val android_hub_update_err_hardlink: String get() = Tr.s(3560)
+  val android_hub_update_err_link: String get() = Tr.s(3561)
+  fun android_hub_update_err_outside(name: Any): String = Tr.f(3562, arrayOf<Any>(name))
+  val android_hub_update_err_norun: String get() = Tr.s(3563)
+  val android_hub_update_err_nohub: String get() = Tr.s(3564)
+  val android_hub_update_err_size: String get() = Tr.s(3565)
+  val android_hub_update_err_checksum: String get() = Tr.s(3566)
+  val android_hub_update_err_guard: String get() = Tr.s(3567)
+  val android_hub_update_err_guard_busy: String get() = Tr.s(3568)
+  fun android_hub_work_todo(count: Any): String = Tr.f(3569, arrayOf<Any>(count))
+  fun android_hub_work_watch(title: Any): String = Tr.f(3570, arrayOf<Any>(title))
+  fun android_hub_work_lock(name: Any): String = Tr.f(3571, arrayOf<Any>(name))
+  val android_hub_work_release_done: String get() = Tr.s(3572)
+  val android_hub_work_flock: String get() = Tr.s(3573)
+  fun android_hub_work_position(n: Any, holder: Any): String = Tr.f(3574, arrayOf<Any>(n, holder))
+  fun android_hub_work_position_job(n: Any, title: Any): String = Tr.f(3575, arrayOf<Any>(n, title))
+  fun android_hub_work_job(title: Any): String = Tr.f(3576, arrayOf<Any>(title))
+  val android_hub_work_subagent: String get() = Tr.s(3577)
+  val android_hub_work_said: String get() = Tr.s(3578)
+  fun android_hub_work_steps(n: Number): String = Tr.f(3579, arrayOf<Any>(n))
+  fun android_hub_work_tokens(n: Any): String = Tr.f(3580, arrayOf<Any>(n))
+  fun android_hub_work_tokens_k(n: Any): String = Tr.f(3581, arrayOf<Any>(n))
+  fun android_hub_work_tokens_m(n: Any): String = Tr.f(3582, arrayOf<Any>(n))
+  fun android_hub_work_where(harness: Any, typed: String, type: Any, remote: String, host: Any, wt: String, branch: Any): String = Tr.f(3583, arrayOf<Any>(harness, typed, type, remote, host, wt, branch))
+  val android_hub_work_state_ended: String get() = Tr.s(3584)
+  val android_hub_work_word_launching: String get() = Tr.s(3585)
+  val android_hub_work_word_watching: String get() = Tr.s(3586)
+  val android_hub_work_word_timedout: String get() = Tr.s(3587)
+  val android_hub_work_word_cancelling: String get() = Tr.s(3588)
+  val android_hub_work_word_queued: String get() = Tr.s(3589)
+  val android_hub_work_word_unknown: String get() = Tr.s(3590)
+  val android_hub_work_word_completed: String get() = Tr.s(3591)
+  val android_hub_work_word_killed: String get() = Tr.s(3592)
+  fun android_hub_locks_outside(pid: Any): String = Tr.f(3593, arrayOf<Any>(pid))
+  val android_hub_picker_notinstalled: String get() = Tr.s(3594)
+  val android_hub_picker_notinstalled_here: String get() = Tr.s(3595)
+  val android_hub_picker_notinstalled_agy: String get() = Tr.s(3596)
+  val android_hub_picker_cli: String get() = Tr.s(3597)
+  fun android_hub_picker_left(left: Any): String = Tr.f(3598, arrayOf<Any>(left))
+  fun android_hub_picker_left_shared(left: Any): String = Tr.f(3599, arrayOf<Any>(left))
+  val android_hub_picker_shared: String get() = Tr.s(3600)
+  val android_hub_picker_why_expired: String get() = Tr.s(3601)
+  val android_hub_picker_why_unchecked: String get() = Tr.s(3602)
+  val android_hub_picker_why_connecting: String get() = Tr.s(3603)
+  val android_hub_picker_why_none: String get() = Tr.s(3604)
+  fun android_hub_picker_window_fivehour(left: Any): String = Tr.f(3605, arrayOf<Any>(left))
+  fun android_hub_picker_window_week(left: Any): String = Tr.f(3606, arrayOf<Any>(left))
+  fun android_hub_picker_window_opus(left: Any): String = Tr.f(3607, arrayOf<Any>(left))
+  fun android_hub_picker_window_sonnet(left: Any): String = Tr.f(3608, arrayOf<Any>(left))
+  fun android_hub_picker_window(label: Any, left: Any): String = Tr.f(3609, arrayOf<Any>(label, left))
+  fun android_hub_picker_resets(`when`: Any): String = Tr.f(3610, arrayOf<Any>(`when`))
+  fun android_hub_picker_extra(used: Any): String = Tr.f(3611, arrayOf<Any>(used))
+  fun android_hub_picker_extra_of(used: Any, limit: Any): String = Tr.f(3612, arrayOf<Any>(used, limit))
+  val android_hub_picker_nolimit: String get() = Tr.s(3613)
+  val android_hub_status_blocked: String get() = Tr.s(3614)
+  val android_hub_order_step_details: String get() = Tr.s(3615)
+  val android_hub_order_step_quote: String get() = Tr.s(3616)
+  val android_hub_order_step_pay: String get() = Tr.s(3617)
+  val android_hub_order_step_made: String get() = Tr.s(3618)
+  val android_hub_order_step_shipped: String get() = Tr.s(3619)
+  val android_hub_order_line_asked: String get() = Tr.s(3620)
+  val android_hub_order_line_getting: String get() = Tr.s(3621)
+  val android_hub_order_line_reply: String get() = Tr.s(3622)
+  val android_hub_order_line_files: String get() = Tr.s(3623)
+  val android_hub_order_line_quoting: String get() = Tr.s(3624)
+  val android_hub_order_line_expired: String get() = Tr.s(3625)
+  val android_hub_order_line_failed: String get() = Tr.s(3626)
+  val android_hub_order_line_pilot: String get() = Tr.s(3627)
+  val android_hub_order_line_refunded: String get() = Tr.s(3628)
+  val android_hub_order_line_quoted: String get() = Tr.s(3629)
+  val android_hub_order_line_fix: String get() = Tr.s(3630)
+  val android_hub_order_line_paid: String get() = Tr.s(3631)
+  val android_hub_order_line_placed: String get() = Tr.s(3632)
+  val android_hub_order_line_shipped: String get() = Tr.s(3633)
+  fun android_hub_order_line_tracking(tracking: Any): String = Tr.f(3634, arrayOf<Any>(tracking))
+  val android_hub_order_line_delivered: String get() = Tr.s(3635)
+  val android_hub_order_customs_ddp: String get() = Tr.s(3636)
+  val android_hub_order_customs: String get() = Tr.s(3637)
+  fun android_hub_order_buynow_total(total: Any): String = Tr.f(3638, arrayOf<Any>(total))
+  fun android_hub_buy_from(price: Any): String = Tr.f(3639, arrayOf<Any>(price))
+  fun android_hub_buy_last(price: Any): String = Tr.f(3640, arrayOf<Any>(price))
+  val android_hub_buy_incomplete: String get() = Tr.s(3641)
+  val android_hub_buy_again: String get() = Tr.s(3642)
+  val android_hub_buy_ready: String get() = Tr.s(3643)
+  val android_hub_buy_ready_board: String get() = Tr.s(3644)
+  fun android_hub_buy_ready_boards(n: Any): String = Tr.f(3645, arrayOf<Any>(n))
+  fun android_hub_buy_ready_parts(parts: Any): String = Tr.f(3646, arrayOf<Any>(parts))
+  fun android_hub_buy_check(note: Any): String = Tr.f(3647, arrayOf<Any>(note))
+  fun android_hub_buy_unavailable(error: Any): String = Tr.f(3648, arrayOf<Any>(error))
+  fun android_hub_buy_unavailable_parts(error: Any, parts: Any): String = Tr.f(3649, arrayOf<Any>(error, parts))
+  val android_hub_buy_ordered_paid: String get() = Tr.s(3650)
+  val android_hub_buy_ordered_placed: String get() = Tr.s(3651)
+  val android_hub_buy_ordered_shipped: String get() = Tr.s(3652)
+  val android_hub_buy_ordered_delivered: String get() = Tr.s(3653)
+  fun android_hub_buy_ordered(state: Any): String = Tr.f(3654, arrayOf<Any>(state))
+  fun android_hub_buy_noestimate(name: Any, path: Any): String = Tr.f(3655, arrayOf<Any>(name, path))
+  fun android_hub_buy_noestimate_why(name: Any, path: Any, why: Any): String = Tr.f(3656, arrayOf<Any>(name, path, why))
+  val android_hub_buy_unreachable: String get() = Tr.s(3657)
+  fun android_hub_buy_said(code: Any): String = Tr.f(3658, arrayOf<Any>(code))
+  val android_hub_ask_reject: String get() = Tr.s(3659)
+  val android_hub_ask_session: String get() = Tr.s(3660)
+  val android_hub_ask_decline: String get() = Tr.s(3661)
+  fun android_hub_ask_quote(detail: Any): String = Tr.f(3662, arrayOf<Any>(detail))
+  val android_hub_guard_safe: String get() = Tr.s(3663)
+  fun android_hub_guard_safe_why(why: Any): String = Tr.f(3664, arrayOf<Any>(why))
+  fun android_hub_guard_degraded(parts: Any): String = Tr.f(3665, arrayOf<Any>(parts))
+  val android_hub_guard_temp: String get() = Tr.s(3666)
+  val android_hub_guard_disk: String get() = Tr.s(3667)
+  fun android_hub_guard_rolledback(build: Any, to: Any): String = Tr.f(3668, arrayOf<Any>(build, to))
+  fun android_hub_guard_nostart(build: Any): String = Tr.f(3669, arrayOf<Any>(build))
+  fun android_hub_guard_nostart_skip(build: Any, skip: Any): String = Tr.f(3670, arrayOf<Any>(build, skip))
+  val android_hub_guard_down_retry: String get() = Tr.s(3671)
+  fun android_hub_guard_down(why: Any): String = Tr.f(3672, arrayOf<Any>(why))
+  fun android_hub_guard_restarting(why: Any): String = Tr.f(3673, arrayOf<Any>(why))
+  fun android_hub_guard_starting(build: Any): String = Tr.f(3674, arrayOf<Any>(build))
+  fun android_hub_guard_safe_on(build: Any, why: Any): String = Tr.f(3675, arrayOf<Any>(build, why))
+  fun android_hub_guard_safe_on_plain(build: Any): String = Tr.f(3676, arrayOf<Any>(build))
+  fun android_hub_guard_running(build: Any): String = Tr.f(3677, arrayOf<Any>(build))
+  val android_hub_guard_act_normal: String get() = Tr.s(3678)
+  val android_hub_guard_act_safe: String get() = Tr.s(3679)
+  val android_hub_guard_act_safe_note: String get() = Tr.s(3680)
+  fun android_hub_guard_act_rollback(build: Any): String = Tr.f(3681, arrayOf<Any>(build))
+  fun android_hub_guard_act_rollback_note(build: Any): String = Tr.f(3682, arrayOf<Any>(build))
+  val android_hub_guard_ans_noaction: String get() = Tr.s(3683)
+  fun android_hub_guard_ans_nobuild(build: Any): String = Tr.f(3684, arrayOf<Any>(build))
+  val android_hub_guard_ans_noback: String get() = Tr.s(3685)
+  val android_hub_guard_ans_stopping: String get() = Tr.s(3686)
+  val android_hub_guard_ans_restarting: String get() = Tr.s(3687)
+  val android_hub_guard_ans_safe: String get() = Tr.s(3688)
+  val android_hub_guard_ans_rollingback: String get() = Tr.s(3689)
+  val android_hub_guard_ans_switching: String get() = Tr.s(3690)
+  fun android_hub_guard_ans_bad(build: Any): String = Tr.f(3691, arrayOf<Any>(build))
+  val android_hub_guard_ans_updating: String get() = Tr.s(3692)
+  val android_hub_guard_ans_asked: String get() = Tr.s(3693)
+  val android_hub_guard_err_unreachable: String get() = Tr.s(3694)
+  val android_hub_guard_err_token: String get() = Tr.s(3695)
+  val android_hub_guard_err_disk: String get() = Tr.s(3696)
+  val android_hub_guard_err_here: String get() = Tr.s(3697)
+  val android_hub_guard_err_noanswer: String get() = Tr.s(3698)
+  val android_hub_guard_err_noguard: String get() = Tr.s(3699)
+  val android_hub_cmd_btw: String get() = Tr.s(3700)
+  val android_hub_cmd_give_desc: String get() = Tr.s(3701)
+  val android_hub_cmd_secret: String get() = Tr.s(3702)
+  val android_hub_cmd_intent: String get() = Tr.s(3703)
+  val android_hub_cmd_settle_desc: String get() = Tr.s(3704)
+  val android_hub_cmd_btw_empty: String get() = Tr.s(3705)
+  val android_hub_cmd_project: String get() = Tr.s(3706)
+  val android_hub_cmd_newproject: String get() = Tr.s(3707)
+  val android_hub_cmd_project_quote: String get() = Tr.s(3708)
+  val android_hub_cmd_project_existing: String get() = Tr.s(3709)
+  val android_hub_cmd_notcmd: String get() = Tr.s(3710)
+  val android_hub_link_screen: String get() = Tr.s(3711)
+  val android_hub_link_conversation: String get() = Tr.s(3712)
+  val android_hub_link_file: String get() = Tr.s(3713)
+  val android_hub_link_file_far: String get() = Tr.s(3714)
+  val android_hub_link_empty: String get() = Tr.s(3715)
+  val android_hub_link_unknown: String get() = Tr.s(3716)
+  val android_hub_link_project: String get() = Tr.s(3717)
+  val android_hub_link_project_far: String get() = Tr.s(3718)
+  val android_hub_link_thread: String get() = Tr.s(3719)
+  val android_hub_link_thread_far: String get() = Tr.s(3720)
+  val android_hub_link_noscreen: String get() = Tr.s(3721)
+  val android_hub_link_noproject: String get() = Tr.s(3722)
+  val android_hub_star_text: String get() = Tr.s(3723)
+  val android_hub_migrate_title: String get() = Tr.s(3724)
+  fun android_hub_migrate_body(step: String): String = Tr.f(3725, arrayOf<Any>(step))
+  fun android_hub_migrate_writing(p: Any, pt: Any, t: Any, tt: Any, e: Any, et: Any): String = Tr.f(3726, arrayOf<Any>(p, pt, t, tt, e, et))
+  fun android_hub_migrate_read(done: Any, total: Any): String = Tr.f(3727, arrayOf<Any>(done, total))
+  fun android_hub_migrate_copied(n: Any): String = Tr.f(3728, arrayOf<Any>(n))
+  fun android_hub_migrate_min(n: Any): String = Tr.f(3729, arrayOf<Any>(n))
+  fun android_hub_migrate_sec(n: Any): String = Tr.f(3730, arrayOf<Any>(n))
+  val android_hub_migrate_measuring: String get() = Tr.s(3731)
+  val android_hub_migrate_done: String get() = Tr.s(3732)
+  val android_hub_migrate_nothing: String get() = Tr.s(3733)
+  val android_hub_migrate_nothing_short: String get() = Tr.s(3734)
+  fun android_hub_migrate_took(n: Any): String = Tr.f(3735, arrayOf<Any>(n))
+  val android_hub_migrate_keys: String get() = Tr.s(3736)
+  val android_hub_migrate_failed: String get() = Tr.s(3737)
+  fun android_hub_migrate_failed_body(why: Any): String = Tr.f(3738, arrayOf<Any>(why))
+  fun android_hub_migrate_failed_body_from(why: Any, from: Any): String = Tr.f(3739, arrayOf<Any>(why, from))
+  fun android_hub_migrate_unreadable(error: Any): String = Tr.f(3740, arrayOf<Any>(error))
+  val android_hub_migrate_busy: String get() = Tr.s(3741)
+  fun android_hub_migrate_runs(n: Number): String = Tr.f(3742, arrayOf<Any>(n))
+  fun android_hub_migrate_routines(n: Number): String = Tr.f(3743, arrayOf<Any>(n))
+  val android_hub_migrate_machines: String get() = Tr.s(3744)
+  val android_hub_migrate_keystay: String get() = Tr.s(3745)
+  val android_hub_migrate_google: String get() = Tr.s(3746)
+  fun android_hub_migrate_clashes(n: Number): String = Tr.f(3747, arrayOf<Any>(n))
+  val android_hub_migrate_fresh: String get() = Tr.s(3748)
+  val android_hub_migrate_running: String get() = Tr.s(3749)
+  fun android_hub_migrate_botfolder(name: Any, gb: Any, path: Any): String = Tr.f(3750, arrayOf<Any>(name, gb, path))
+  fun android_hub_migrate_notcopied(path: Any, why: Any): String = Tr.f(3751, arrayOf<Any>(path, why))
+  fun android_hub_migrate_signin(names: Any): String = Tr.f(3752, arrayOf<Any>(names))
+  val android_hub_migrate_accounts: String get() = Tr.s(3753)
+  fun android_hub_migrate_vault(why: Any): String = Tr.f(3754, arrayOf<Any>(why))
+  val android_hub_history_title: String get() = Tr.s(3755)
+  val android_hub_history_closed: String get() = Tr.s(3756)
+  val android_away: String get() = Tr.s(3757)
+  val android_open: String get() = Tr.s(3758)
+  val android_search_messages: String get() = Tr.s(3759)
+  val android_find_inthread: String get() = Tr.s(3760)
+  val android_find_error: String get() = Tr.s(3761)
+  val android_find_prev: String get() = Tr.s(3762)
+  val android_find_next: String get() = Tr.s(3763)
+  val android_find_nomatch: String get() = Tr.s(3764)
+  fun android_find_count(n: Number, total: Number): String = Tr.f(3765, arrayOf<Any>(n, total))
+  val android_find_you: String get() = Tr.s(3766)
+  val android_find_agent: String get() = Tr.s(3767)
+  val android_sub_thread: String get() = Tr.s(3768)
+  fun android_sub_back(title: Any): String = Tr.f(3769, arrayOf<Any>(title))
+  val android_sub_gone: String get() = Tr.s(3770)
+  fun android_sub_more(n: Number): String = Tr.f(3771, arrayOf<Any>(n))
+  val android_sub_none: String get() = Tr.s(3772)
+  val android_sub_asked: String get() = Tr.s(3773)
+  val android_sub_tool: String get() = Tr.s(3774)
+  fun android_machine_on(name: Any): String = Tr.f(3775, arrayOf<Any>(name))
+  fun android_handoff_from(title: Any): String = Tr.f(3776, arrayOf<Any>(title))
+  fun android_handoff_note(note: Any): String = Tr.f(3777, arrayOf<Any>(note))
+  val android_queue_unsent: String get() = Tr.s(3778)
+  fun android_mark_runs(machine: Any): String = Tr.f(3779, arrayOf<Any>(machine))
+  fun android_mark_also(machines: Any): String = Tr.f(3780, arrayOf<Any>(machines))
+  fun android_mark_newon(machine: Any): String = Tr.f(3781, arrayOf<Any>(machine))
+  val android_google_signedin: String get() = Tr.s(3782)
+  val android_google_back: String get() = Tr.s(3783)
+  val android_improve_search: String get() = Tr.s(3784)
+  val android_improve_nomatch: String get() = Tr.s(3785)
+  val android_ring_head: String get() = Tr.s(3786)
+  val android_swarm_new: String get() = Tr.s(3787)
+  val android_swarm_topic: String get() = Tr.s(3788)
+  val android_swarm_goal: String get() = Tr.s(3789)
+  val android_swarm_seed: String get() = Tr.s(3790)
+  val android_swarm_member_add: String get() = Tr.s(3791)
+  fun android_swarm_member_n(n: Any): String = Tr.f(3792, arrayOf<Any>(n))
+  val android_swarm_role: String get() = Tr.s(3793)
+  fun android_swarm_members(n: Number): String = Tr.f(3794, arrayOf<Any>(n))
+  val android_swarm_pause: String get() = Tr.s(3795)
+  val android_swarm_resume: String get() = Tr.s(3796)
+  val android_swarm_stop: String get() = Tr.s(3797)
+  fun android_swarm_stop_ask(name: Any): String = Tr.f(3798, arrayOf<Any>(name))
+  val android_swarm_stop_yes: String get() = Tr.s(3799)
+  val android_swarm_keep: String get() = Tr.s(3800)
+  fun android_swarm_remove_member(name: Any): String = Tr.f(3801, arrayOf<Any>(name))
+  val android_swarm_state_active: String get() = Tr.s(3802)
+  val android_swarm_state_paused: String get() = Tr.s(3803)
+  val android_swarm_state_stopped: String get() = Tr.s(3804)
+  val android_swarm_state_done: String get() = Tr.s(3805)
+  val android_swarm_reason_circular: String get() = Tr.s(3806)
+  val android_swarm_reason_idle: String get() = Tr.s(3807)
+  val android_swarm_reason_budget: String get() = Tr.s(3808)
+  val android_swarm_reason_person: String get() = Tr.s(3809)
+  val android_swarm_reason_chatter: String get() = Tr.s(3810)
+  val android_swarm_tag_idea: String get() = Tr.s(3811)
+  val android_swarm_tag_critique: String get() = Tr.s(3812)
+  val android_swarm_tag_claim: String get() = Tr.s(3813)
+  val android_swarm_tag_done: String get() = Tr.s(3814)
+  val android_swarm_tag_question: String get() = Tr.s(3815)
+  val android_swarm_tag_synthesis: String get() = Tr.s(3816)
+  val android_swarm_waiting: String get() = Tr.s(3817)
+  fun android_swarm_held(why: Any): String = Tr.f(3818, arrayOf<Any>(why))
+  val android_swarm_post_hint: String get() = Tr.s(3819)
+  val android_swarm_none: String get() = Tr.s(3820)
+  val android_swarm_gone: String get() = Tr.s(3821)
+  val android_swarm_provider: String get() = Tr.s(3822)
+  val android_swarm_model: String get() = Tr.s(3823)
+  fun android_buy_ask(project: Any): String = Tr.f(3824, arrayOf<Any>(project))
+  val cat_cat: String get() = Tr.s(3825)
+  val cat_own: String get() = Tr.s(3826)
+  val cat_different: String get() = Tr.s(3827)
+  val cat_auto: String get() = Tr.s(3828)
+  val cat_color_bad: String get() = Tr.s(3829)
+  val android_copy_run: String get() = Tr.s(3830)
+  val android_copy_fullscreen: String get() = Tr.s(3831)
+  val android_term_chat_old: String get() = Tr.s(3832)
+  val android_browser_head: String get() = Tr.s(3833)
+  val android_clone_mode_folder: String get() = Tr.s(3834)
+  val android_clone_mode_git: String get() = Tr.s(3835)
+  val android_clone_repo_hint: String get() = Tr.s(3836)
+  val android_clone_private: String get() = Tr.s(3837)
+  val android_clone_signin: String get() = Tr.s(3838)
+  val android_clone_into: String get() = Tr.s(3839)
+  val android_clone_folder_change: String get() = Tr.s(3840)
+  val android_clone_folder_use: String get() = Tr.s(3841)
+  val android_clone_name_hint: String get() = Tr.s(3842)
+  val android_clone_thread: String get() = Tr.s(3843)
+  val android_clone_go: String get() = Tr.s(3844)
+  val android_clone_same: String get() = Tr.s(3845)
+  val android_clone_retry: String get() = Tr.s(3846)
+  val android_clone_loading: String get() = Tr.s(3847)
+  val android_clone_signin_code: String get() = Tr.s(3848)
+  val android_clone_signin_wait: String get() = Tr.s(3849)
+  val android_clone_signin_done: String get() = Tr.s(3850)
+  val android_clone_signin_failed: String get() = Tr.s(3851)
+  val android_clone_hint_nogh: String get() = Tr.s(3852)
+  val android_clone_hint_signedout: String get() = Tr.s(3853)
+  val android_clone_hint_error: String get() = Tr.s(3854)
+  val android_clone_phase_starting: String get() = Tr.s(3855)
+  val android_clone_phase_connecting: String get() = Tr.s(3856)
+  val android_clone_phase_counting: String get() = Tr.s(3857)
+  val android_clone_phase_compressing: String get() = Tr.s(3858)
+  val android_clone_phase_receiving: String get() = Tr.s(3859)
+  val android_clone_phase_resolving: String get() = Tr.s(3860)
+  val android_clone_phase_updating: String get() = Tr.s(3861)
+  val android_clone_phase_lfs: String get() = Tr.s(3862)
+  val android_clone_phase_adding: String get() = Tr.s(3863)
+  val android_clone_phase_cancelled: String get() = Tr.s(3864)
+  fun android_clone_busy(path: Any): String = Tr.f(3865, arrayOf<Any>(path))
+  fun android_clone_file(path: Any): String = Tr.f(3866, arrayOf<Any>(path))
+  val android_download_saved: String get() = Tr.s(3867)
+  fun android_download_of(have: Any, total: Any): String = Tr.f(3868, arrayOf<Any>(have, total))
+  val android_download_share: String get() = Tr.s(3869)
+  val android_download_retry: String get() = Tr.s(3870)
+  val android_download_noapp: String get() = Tr.s(3871)
+  val android_download_button: String get() = Tr.s(3872)
+  fun mobile_diff_summary(files: Any, added: Any, removed: Any): String = Tr.f(3873, arrayOf<Any>(files, added, removed))
+  fun mobile_diff_summary_one(added: Any, removed: Any): String = Tr.f(3874, arrayOf<Any>(added, removed))
+  val mobile_diff_new: String get() = Tr.s(3875)
+  val mobile_diff_deleted: String get() = Tr.s(3876)
+  val mobile_diff_renamed: String get() = Tr.s(3877)
+  val mobile_diff_binary: String get() = Tr.s(3878)
+  val mobile_settings_advanced: String get() = Tr.s(3879)
+  val android_attach_file: String get() = Tr.s(3880)
+  val android_connecting_word: String get() = Tr.s(3881)
+  fun ios_sections_running(n: Number): String = Tr.f(3882, arrayOf<Any>(n))
+  val ios_alerts_ask: String get() = Tr.s(3883)
+  val ios_alerts_allow: String get() = Tr.s(3884)
+  val ios_alerts_later: String get() = Tr.s(3885)
+  val ios_viewerbg: String get() = Tr.s(3886)
+  val ios_viewerbg_auto: String get() = Tr.s(3887)
+  val ios_viewerbg_custom: String get() = Tr.s(3888)
+  val ios_viewerbg_color: String get() = Tr.s(3889)
+  val ios_viewerbg_note: String get() = Tr.s(3890)
+  fun ios_hub_use(hub: Any): String = Tr.f(3891, arrayOf<Any>(hub))
+  val ios_thread_loading: String get() = Tr.s(3892)
+  val ios_hub_connecting: String get() = Tr.s(3893)
+  fun ios_project_remove_ask(title: Any): String = Tr.f(3894, arrayOf<Any>(title))
+  val ios_side_room: String get() = Tr.s(3895)
+  val ios_side_bot: String get() = Tr.s(3896)
+  val ios_side_uber: String get() = Tr.s(3897)
+  fun ios_project_terms(project: Any): String = Tr.f(3898, arrayOf<Any>(project))
+  fun ios_project_newthread(project: Any): String = Tr.f(3899, arrayOf<Any>(project))
+  fun ios_lock_waiting(n: Number): String = Tr.f(3900, arrayOf<Any>(n))
+  fun ios_conn_connecting(hub: Any): String = Tr.f(3901, arrayOf<Any>(hub))
+  val ios_conn_offline: String get() = Tr.s(3902)
+  fun ios_kids_hide(n: Number): String = Tr.f(3903, arrayOf<Any>(n))
+  fun ios_kids_show(n: Number): String = Tr.f(3904, arrayOf<Any>(n))
+  fun ios_model_label(model: Any): String = Tr.f(3905, arrayOf<Any>(model))
+  val ios_model_default: String get() = Tr.s(3906)
+  val ios_start: String get() = Tr.s(3907)
+  val ios_starting: String get() = Tr.s(3908)
+  val ios_room_missing: String get() = Tr.s(3909)
+  val ios_secret_new: String get() = Tr.s(3910)
+  fun ios_secret_named(name: Any): String = Tr.f(3911, arrayOf<Any>(name))
+  val ios_secret_refused: String get() = Tr.s(3912)
+  val ios_find_gone: String get() = Tr.s(3913)
+  val ios_thread: String get() = Tr.s(3914)
+  val ios_state_working: String get() = Tr.s(3915)
+  val ios_state_inactive: String get() = Tr.s(3916)
+  val ios_state_blocked: String get() = Tr.s(3917)
+  val ios_state_stalled: String get() = Tr.s(3918)
+  val ios_state_monitoring: String get() = Tr.s(3919)
+  val ios_state_finished: String get() = Tr.s(3920)
+  val ios_state_active: String get() = Tr.s(3921)
+  val ios_composer_hint: String get() = Tr.s(3922)
+  val ios_dictate_stop: String get() = Tr.s(3923)
+  val ios_dictate: String get() = Tr.s(3924)
+  val ios_attach_pictures: String get() = Tr.s(3925)
+  val ios_attach_pictures_no: String get() = Tr.s(3926)
+  val ios_draw_no: String get() = Tr.s(3927)
+  val ios_attach_no: String get() = Tr.s(3928)
+  val ios_command_failed: String get() = Tr.s(3929)
+  fun ios_work_head(word: Any): String = Tr.f(3930, arrayOf<Any>(word))
+  val ios_fold_open: String get() = Tr.s(3931)
+  val ios_fold_shut: String get() = Tr.s(3932)
+  val ios_step_design: String get() = Tr.s(3933)
+  val ios_ask_asks: String get() = Tr.s(3934)
+  val ios_ask_asked: String get() = Tr.s(3935)
+  fun ios_ask_answered(answer: Any): String = Tr.f(3936, arrayOf<Any>(answer))
+  val ios_improve_sent: String get() = Tr.s(3937)
+  val ios_on: String get() = Tr.s(3938)
+  val ios_off: String get() = Tr.s(3939)
+  val ios_system: String get() = Tr.s(3940)
+  val ios_light: String get() = Tr.s(3941)
+  val ios_dark: String get() = Tr.s(3942)
+  val ios_conn_online: String get() = Tr.s(3943)
+  val ios_conn_connectingword: String get() = Tr.s(3944)
+  val ios_conn_offlineword: String get() = Tr.s(3945)
+  fun ios_version(version: Any, build: Any): String = Tr.f(3946, arrayOf<Any>(version, build))
+  fun ios_hub_forget_ask(hub: Any): String = Tr.f(3947, arrayOf<Any>(hub))
+  val ios_hub_this: String get() = Tr.s(3948)
+  val ios_update_stable: String get() = Tr.s(3949)
+  val ios_update_beta: String get() = Tr.s(3950)
+  val ios_order: String get() = Tr.s(3951)
+  fun ios_order_named(name: Any): String = Tr.f(3952, arrayOf<Any>(name))
+  val ios_invite_machine: String get() = Tr.s(3953)
+  val ios_invite_device: String get() = Tr.s(3954)
+  fun ios_link_used(`when`: Any, who: Any, mark: String): String = Tr.f(3955, arrayOf<Any>(`when`, who, mark))
+  val ios_link_amachine: String get() = Tr.s(3956)
+  val ios_link_adevice: String get() = Tr.s(3957)
+  val ios_link_revoked_never: String get() = Tr.s(3958)
+  fun ios_link_revoked_with(who: Any): String = Tr.f(3959, arrayOf<Any>(who))
+  val ios_link_machine_linked: String get() = Tr.s(3960)
+  val ios_link_device_paired: String get() = Tr.s(3961)
+  val ios_link_expired: String get() = Tr.s(3962)
+  fun ios_link_open(time: Any): String = Tr.f(3963, arrayOf<Any>(time))
+  fun ios_hub_address(address: Any): String = Tr.f(3964, arrayOf<Any>(address))
+  val ios_share: String get() = Tr.s(3965)
+  fun ios_link_revoke_used(kind: String, name: Any): String = Tr.f(3966, arrayOf<Any>(kind, name))
+  val ios_unnamed: String get() = Tr.s(3967)
+  val ios_link_revoke_open: String get() = Tr.s(3968)
+  val ios_devices_loadfail: String get() = Tr.s(3969)
+  val ios_invite_creating: String get() = Tr.s(3970)
+  val ios_invite_fail: String get() = Tr.s(3971)
+  val ios_invite_ready: String get() = Tr.s(3972)
+  val ios_invite_fail_conn: String get() = Tr.s(3973)
+  val ios_revoke_device_fail: String get() = Tr.s(3974)
+  val ios_revoke_link_fail: String get() = Tr.s(3975)
+  val ios_pair_repair: String get() = Tr.s(3976)
+  val ios_pair_connect_title: String get() = Tr.s(3977)
+  val ios_pair_paste: String get() = Tr.s(3978)
+  val ios_pair_paste_hint: String get() = Tr.s(3979)
+  val ios_pair_invalid: String get() = Tr.s(3980)
+  fun ios_thread_delete_ask(title: Any): String = Tr.f(3981, arrayOf<Any>(title))
+  fun ios_search_none(query: Any): String = Tr.f(3982, arrayOf<Any>(query))
+  val ios_you: String get() = Tr.s(3983)
+  val ios_agent: String get() = Tr.s(3984)
+  fun ios_room_post_to(room: Any): String = Tr.f(3985, arrayOf<Any>(room))
+  fun ios_find_none(query: Any): String = Tr.f(3986, arrayOf<Any>(query))
+  val ios_ago_now: String get() = Tr.s(3987)
+  fun ios_ago_m(n: Any): String = Tr.f(3988, arrayOf<Any>(n))
+  fun ios_ago_h(n: Any): String = Tr.f(3989, arrayOf<Any>(n))
+  fun ios_ago_d(n: Any): String = Tr.f(3990, arrayOf<Any>(n))
+  val ios_mic_off: String get() = Tr.s(3991)
+  val ios_mic_failed: String get() = Tr.s(3992)
+  val ios_link_update: String get() = Tr.s(3993)
+  val ios_link_nothere: String get() = Tr.s(3994)
+  val ios_hub_notconnected: String get() = Tr.s(3995)
+  fun ios_preview_none(size: Any): String = Tr.f(3996, arrayOf<Any>(size))
+  val ios_review_resolved: String get() = Tr.s(3997)
+  val ios_review_reopen: String get() = Tr.s(3998)
+  val ios_review_resolve: String get() = Tr.s(3999)
+  fun ios_settled_count(n: Any): String = Tr.f(4000, arrayOf<Any>(n))
+  fun ios_history_count(n: Any): String = Tr.f(4001, arrayOf<Any>(n))
+  fun ios_pad_colour(n: Any): String = Tr.f(4002, arrayOf<Any>(n))
+  val ios_pad_pen: String get() = Tr.s(4003)
+  val ios_pad_box: String get() = Tr.s(4004)
+  val ios_pad_eraser: String get() = Tr.s(4005)
+  val ios_hub_restart: String get() = Tr.s(4006)
+  val ios_hub_refused_pairing: String get() = Tr.s(4007)
+  val ios_hub_asking: String get() = Tr.s(4008)
+  val ios_hub_restart_none: String get() = Tr.s(4009)
+  val ios_hub_status_fail: String get() = Tr.s(4010)
+  val ios_hub_sent: String get() = Tr.s(4011)
+  val ios_hub_refused: String get() = Tr.s(4012)
+  val ios_hub_cannot: String get() = Tr.s(4013)
+  val ios_hub_machine_unreachable: String get() = Tr.s(4014)
+  val ios_hub_noanswer: String get() = Tr.s(4015)
+  fun ios_hub_still(status: Any): String = Tr.f(4016, arrayOf<Any>(status))
+  val ios_hub_waiting: String get() = Tr.s(4017)
+  fun ios_hub_is(status: Any): String = Tr.f(4018, arrayOf<Any>(status))
+  val ios_hub_down: String get() = Tr.s(4019)
+  val ios_hub_up_safe_degraded: String get() = Tr.s(4020)
+  val ios_hub_up_degraded: String get() = Tr.s(4021)
+  val ios_hub_up_safe: String get() = Tr.s(4022)
+  val ios_hub_up: String get() = Tr.s(4023)
+  val ios_star: String get() = Tr.s(4024)
+  val ios_pad_length_example: String get() = Tr.s(4025)
+  val ios_pair_code_field: String get() = Tr.s(4026)
+  val ios_accounts: String get() = Tr.s(4027)
+  val ios_devices_add: String get() = Tr.s(4028)
+  val ios_hub_add: String get() = Tr.s(4029)
+  val ios_accounts_addsignin: String get() = Tr.s(4030)
+  val ios_devices_intro: String get() = Tr.s(4031)
+  val ios_project_add_first: String get() = Tr.s(4032)
+  val ios_settings_alerts: String get() = Tr.s(4033)
+  val ios_settings_sound: String get() = Tr.s(4034)
+  val ios_pair_ask_note: String get() = Tr.s(4035)
+  val ios_projects_none_note: String get() = Tr.s(4036)
+  val ios_review_comment_field: String get() = Tr.s(4037)
+  val ios_project_badge: String get() = Tr.s(4038)
+  val ios_order_buy: String get() = Tr.s(4039)
+  val ios_diff_head: String get() = Tr.s(4040)
+  val ios_photo_choose: String get() = Tr.s(4041)
+  val ios_close_lower: String get() = Tr.s(4042)
+  val ios_compare_close: String get() = Tr.s(4043)
+  val ios_badge_colour: String get() = Tr.s(4044)
+  val ios_pair_code_connect: String get() = Tr.s(4045)
+  val ios_history: String get() = Tr.s(4046)
+  val ios_copied: String get() = Tr.s(4047)
+  val ios_copy_code: String get() = Tr.s(4048)
+  val ios_copy_run: String get() = Tr.s(4049)
+  val ios_term_fullscreen: String get() = Tr.s(4050)
+  val ios_delete_dots: String get() = Tr.s(4051)
+  val ios_devices: String get() = Tr.s(4052)
+  val ios_pad_hint_eraser: String get() = Tr.s(4053)
+  val ios_pad_hint_pen: String get() = Tr.s(4054)
+  val ios_pad_hint_box: String get() = Tr.s(4055)
+  val ios_pad_paper: String get() = Tr.s(4056)
+  val ios_pair_invite_incomplete: String get() = Tr.s(4057)
+  val ios_pair_enter: String get() = Tr.s(4058)
+  val ios_pair_code_needhub: String get() = Tr.s(4059)
+  val ios_devices_none: String get() = Tr.s(4060)
+  val ios_invite_expired: String get() = Tr.s(4061)
+  val ios_invite_expires: String get() = Tr.s(4062)
+  val ios_project_folder: String get() = Tr.s(4063)
+  val ios_quiet_from: String get() = Tr.s(4064)
+  val ios_term_gone: String get() = Tr.s(4065)
+  val ios_hub: String get() = Tr.s(4066)
+  val ios_hub_address_field: String get() = Tr.s(4067)
+  val ios_badge_icon: String get() = Tr.s(4068)
+  val ios_improvements: String get() = Tr.s(4069)
+  val ios_quiet_note: String get() = Tr.s(4070)
+  val ios_term_end: String get() = Tr.s(4071)
+  val ios_browser_keys: String get() = Tr.s(4072)
+  val ios_devices_lastseen: String get() = Tr.s(4073)
+  val ios_pad_length_ask: String get() = Tr.s(4074)
+  val ios_licences: String get() = Tr.s(4075)
+  val ios_links_none: String get() = Tr.s(4076)
+  val ios_thread_older: String get() = Tr.s(4077)
+  val ios_mech_loading: String get() = Tr.s(4078)
+  val ios_thread_detach: String get() = Tr.s(4079)
+  val ios_accounts_name: String get() = Tr.s(4080)
+  val ios_term_newshell: String get() = Tr.s(4081)
+  val ios_accounts_none: String get() = Tr.s(4082)
+  val ios_browser_none: String get() = Tr.s(4083)
+  val ios_diff_none: String get() = Tr.s(4084)
+  val ios_review_comments_none: String get() = Tr.s(4085)
+  val ios_mech_none: String get() = Tr.s(4086)
+  val ios_projects_none: String get() = Tr.s(4087)
+  val ios_notconnected: String get() = Tr.s(4088)
+  val ios_term_none: String get() = Tr.s(4089)
+  val ios_threads_none: String get() = Tr.s(4090)
+  val ios_secret_notneeded: String get() = Tr.s(4091)
+  val ios_notpaired: String get() = Tr.s(4092)
+  val ios_send_failed: String get() = Tr.s(4093)
+  val ios_compare_none: String get() = Tr.s(4094)
+  val ios_settings_alerts_note: String get() = Tr.s(4095)
+  val ios_pair_howto: String get() = Tr.s(4096)
+  val ios_improve_github: String get() = Tr.s(4097)
+  val ios_signin_open: String get() = Tr.s(4098)
+  val ios_devices_paired: String get() = Tr.s(4099)
+  val ios_links: String get() = Tr.s(4100)
+  val ios_pair_ask: String get() = Tr.s(4101)
+  val ios_paste: String get() = Tr.s(4102)
+  val ios_signin_code_field: String get() = Tr.s(4103)
+  val ios_secret_value: String get() = Tr.s(4104)
+  val ios_viewer_picked: String get() = Tr.s(4105)
+  val ios_room_post: String get() = Tr.s(4106)
+  val ios_quiet: String get() = Tr.s(4107)
+  val ios_reconnect: String get() = Tr.s(4108)
+  val ios_picture_remove: String get() = Tr.s(4109)
+  val ios_project_rename: String get() = Tr.s(4110)
+  val ios_revoke_ask: String get() = Tr.s(4111)
+  val ios_revoke_link_ask: String get() = Tr.s(4112)
+  val ios_review_run: String get() = Tr.s(4113)
+  val ios_find: String get() = Tr.s(4114)
+  val ios_search_field: String get() = Tr.s(4115)
+  val ios_signin_send: String get() = Tr.s(4116)
+  val ios_improve_send: String get() = Tr.s(4117)
+  val ios_term_shell: String get() = Tr.s(4118)
+  val ios_thread_empty: String get() = Tr.s(4119)
+  val ios_improve_send_note: String get() = Tr.s(4120)
+  val ios_state: String get() = Tr.s(4121)
+  val ios_photo_take: String get() = Tr.s(4122)
+  val ios_terminals: String get() = Tr.s(4123)
+  val ios_term_screen: String get() = Tr.s(4124)
+  val ios_voice_spelling: String get() = Tr.s(4125)
+  val ios_revoke_note: String get() = Tr.s(4126)
+  val ios_file_unread: String get() = Tr.s(4127)
+  val ios_hub_proto: String get() = Tr.s(4128)
+  val ios_hub_forget_note: String get() = Tr.s(4129)
+  val ios_diff_nogit: String get() = Tr.s(4130)
+  val ios_thread_actions: String get() = Tr.s(4131)
+  val ios_quiet_to: String get() = Tr.s(4132)
+  val ios_pair_code_type: String get() = Tr.s(4133)
+  val ios_pad_undo: String get() = Tr.s(4134)
+  val ios_updates: String get() = Tr.s(4135)
+  val ios_quiet_urgent: String get() = Tr.s(4136)
+  val ios_use: String get() = Tr.s(4137)
+  val ios_pair_fresh: String get() = Tr.s(4138)
+  val ios_newthread_hint: String get() = Tr.s(4139)
+  val ios_improve_ask: String get() = Tr.s(4140)
+  val ios_find_field: String get() = Tr.s(4141)
+  val ios_browser_driving: String get() = Tr.s(4142)
+  val ios_ask_answer: String get() = Tr.s(4143)
+  val ios_pair_wrongcode: String get() = Tr.s(4144)
+  val ios_pair_expired: String get() = Tr.s(4145)
+  val ios_pair_used: String get() = Tr.s(4146)
+  val ios_pair_revoked: String get() = Tr.s(4147)
+  val ios_pair_ratelimited: String get() = Tr.s(4148)
+  val ios_pair_storage: String get() = Tr.s(4149)
+  val ios_pair_required: String get() = Tr.s(4150)
+  val ios_pair_unreachable: String get() = Tr.s(4151)
+  val ios_connecting: String get() = Tr.s(4152)
+  val ios_offline: String get() = Tr.s(4153)
+  val ios_hub_refused_plain: String get() = Tr.s(4154)
+  val ios_thinking: String get() = Tr.s(4155)
+  val ios_tab_board: String get() = Tr.s(4156)
+  val ios_tab_schematic: String get() = Tr.s(4157)
+  val ios_tab_split: String get() = Tr.s(4158)
+  val ios_tab_mech: String get() = Tr.s(4159)
+  val ios_tab_files: String get() = Tr.s(4160)
+  val ios_tab_diff: String get() = Tr.s(4161)
+  val ios_tab_review: String get() = Tr.s(4162)
+  val ios_tab_browser: String get() = Tr.s(4163)
+  val ios_review_checks: String get() = Tr.s(4164)
+  val ios_review_bom: String get() = Tr.s(4165)
+  val ios_review_comments: String get() = Tr.s(4166)
+  val ios_board_none: String get() = Tr.s(4167)
+  val ios_schematic_none: String get() = Tr.s(4168)
+  fun ios_term_exited(code: Any): String = Tr.f(4169, arrayOf<Any>(code))
+  val ios_term_failed: String get() = Tr.s(4170)
+  fun ios_island_more(n: Number): String = Tr.f(4171, arrayOf<Any>(n))
+  val ios_island_stale: String get() = Tr.s(4172)
+  fun ios_plot_previous(why: Any): String = Tr.f(4173, arrayOf<Any>(why))
+  val ios_plot_decoding: String get() = Tr.s(4174)
+  val ios_plot_undecodable: String get() = Tr.s(4175)
+  val ios_plot_badref: String get() = Tr.s(4176)
+  val ios_plot_badmodel: String get() = Tr.s(4177)
+  val ios_plot_incomplete: String get() = Tr.s(4178)
+  val ios_plot_unexpected: String get() = Tr.s(4179)
+  val ios_part_bad: String get() = Tr.s(4180)
+  val ios_part_placement: String get() = Tr.s(4181)
+  val ios_part_triangles: String get() = Tr.s(4182)
+  val ios_part_incomplete: String get() = Tr.s(4183)
+  val ios_part_unexpected: String get() = Tr.s(4184)
+  fun ios_parts_progress(done: Number, of: Number): String = Tr.f(4185, arrayOf<Any>(done, of))
+  val ios_hub_timeout: String get() = Tr.s(4186)
+  val ios_pair_local: String get() = Tr.s(4187)
+  val ios_search_messages: String get() = Tr.s(4188)
+  fun ios_sub_of(thread: Any): String = Tr.f(4189, arrayOf<Any>(thread))
+  val ios_sub_thread: String get() = Tr.s(4190)
+  val ios_sub_gone: String get() = Tr.s(4191)
+  fun ios_sub_more(n: Number): String = Tr.f(4192, arrayOf<Any>(n))
+  val ios_sub_none: String get() = Tr.s(4193)
+  val ios_sub_title: String get() = Tr.s(4194)
+  val ios_sub_tool: String get() = Tr.s(4195)
+  val ios_sub_reported: String get() = Tr.s(4196)
+  val ios_sub_ended: String get() = Tr.s(4197)
+  val ios_state_completed: String get() = Tr.s(4198)
+  val ios_handoff_open: String get() = Tr.s(4199)
+  fun ios_handoff_from(title: Any): String = Tr.f(4200, arrayOf<Any>(title))
+  fun ios_handoff_note(note: Any): String = Tr.f(4201, arrayOf<Any>(note))
+  fun ios_machine_away(label: Any): String = Tr.f(4202, arrayOf<Any>(label))
+  fun ios_machine_on(machine: Any): String = Tr.f(4203, arrayOf<Any>(machine))
+  fun ios_machine_runs(machine: Any): String = Tr.f(4204, arrayOf<Any>(machine))
+  val ios_machine_every: String get() = Tr.s(4205)
+  val ios_thread_marked: String get() = Tr.s(4206)
+  val ios_find_bar: String get() = Tr.s(4207)
+  val ios_find_prev: String get() = Tr.s(4208)
+  val ios_find_next: String get() = Tr.s(4209)
+  val ios_find_close: String get() = Tr.s(4210)
+  fun ios_find_count(at: Number, total: Number): String = Tr.f(4211, arrayOf<Any>(at, total))
+  fun ios_find_countmore(at: Number, total: Number): String = Tr.f(4212, arrayOf<Any>(at, total))
+  val ios_queue_unsent: String get() = Tr.s(4213)
+  val ios_queue_refused: String get() = Tr.s(4214)
+  val ios_queue_sending: String get() = Tr.s(4215)
+  fun ios_newon(machine: Any): String = Tr.f(4216, arrayOf<Any>(machine))
+  fun ios_newon_away(machine: Any): String = Tr.f(4217, arrayOf<Any>(machine))
+  fun ios_machine_also(machines: Any): String = Tr.f(4218, arrayOf<Any>(machines))
+  val ios_voice_mic_note: String get() = Tr.s(4219)
+  fun ios_voice_mic_note_device(device: Any): String = Tr.f(4220, arrayOf<Any>(device))
+  val ios_voice_dict_empty: String get() = Tr.s(4221)
+  val ios_voice_learned_empty: String get() = Tr.s(4222)
+  val ios_voice_pebble: String get() = Tr.s(4223)
+  val ios_voice_pebble_note: String get() = Tr.s(4224)
+  val ios_devices_add_note: String get() = Tr.s(4225)
+  val ios_buy: String get() = Tr.s(4226)
+  fun ios_buy_from(price: Any): String = Tr.f(4227, arrayOf<Any>(price))
+  fun ios_buy_last(price: Any): String = Tr.f(4228, arrayOf<Any>(price))
+  val ios_buy_incomplete: String get() = Tr.s(4229)
+  val ios_improve_search: String get() = Tr.s(4230)
+  val android_notify_head: String get() = Tr.s(4231)
+  val gpui_keysheet_note: String get() = Tr.s(4232)
+  val gpui_keys_help: String get() = Tr.s(4233)
+  val gpui_f2_welcome_body: String get() = Tr.s(4234)
+  fun gpui_f2_data_folder_note(home: Any): String = Tr.f(4235, arrayOf<Any>(home))
+  val gpui_f2_choose_another: String get() = Tr.s(4236)
+  val gpui_f2_usage_note: String get() = Tr.s(4237)
+  val gpui_f2_v014: String get() = Tr.s(4238)
+  val gpui_f2_v014_copied: String get() = Tr.s(4239)
+  fun gpui_f2_v014_found(from: Any): String = Tr.f(4240, arrayOf<Any>(from))
+  val gpui_f2_agents_body: String get() = Tr.s(4241)
+  fun gpui_f2_installing(note: Any): String = Tr.f(4242, arrayOf<Any>(note))
+  fun gpui_f2_install_failed(note: Any): String = Tr.f(4243, arrayOf<Any>(note))
+  val gpui_f2_installed: String get() = Tr.s(4244)
+  fun gpui_f2_version(v: Any): String = Tr.f(4245, arrayOf<Any>(v))
+  fun gpui_f2_v_connected(v: Any): String = Tr.f(4246, arrayOf<Any>(v))
+  fun gpui_f2_v_connected_as(v: Any, who: Any): String = Tr.f(4247, arrayOf<Any>(v, who))
+  val gpui_f2_i_connected: String get() = Tr.s(4248)
+  fun gpui_f2_i_connected_as(who: Any): String = Tr.f(4249, arrayOf<Any>(who))
+  fun gpui_f2_v_notconnected(v: Any): String = Tr.f(4250, arrayOf<Any>(v))
+  val gpui_f2_i_notconnected: String get() = Tr.s(4251)
+  fun gpui_f2_v_runcmd(v: Any, cmd: Any): String = Tr.f(4252, arrayOf<Any>(v, cmd))
+  fun gpui_f2_i_runcmd(cmd: Any): String = Tr.f(4253, arrayOf<Any>(cmd))
+  val gpui_f2_more_agents: String get() = Tr.s(4254)
+  val gpui_f2_check_after: String get() = Tr.s(4255)
+  val gpui_f2_tools: String get() = Tr.s(4256)
+  val gpui_f2_tools_body: String get() = Tr.s(4257)
+  fun gpui_f2_kicad_ok(v: Any, path: Any): String = Tr.f(4258, arrayOf<Any>(v, path))
+  fun gpui_f2_kicad_installing(v: Any, note: Any): String = Tr.f(4259, arrayOf<Any>(v, note))
+  fun gpui_f2_kicad_auto(v: Any): String = Tr.f(4260, arrayOf<Any>(v))
+  val gpui_f2_kicad_nopkg: String get() = Tr.s(4261)
+  val gpui_f2_freecad_notfound: String get() = Tr.s(4262)
+  val gpui_f2_locate_kicad: String get() = Tr.s(4263)
+  val gpui_f2_locate_freecad: String get() = Tr.s(4264)
+  fun gpui_f2_locate_note(tool: Any): String = Tr.f(4265, arrayOf<Any>(tool))
+  fun gpui_f2_path_to(tool: Any): String = Tr.f(4266, arrayOf<Any>(tool))
+  val gpui_f2_alwayson: String get() = Tr.s(4267)
+  val gpui_f2_alwayson_body: String get() = Tr.s(4268)
+  val gpui_f2_aon_here: String get() = Tr.s(4269)
+  val gpui_f2_aon_here_note: String get() = Tr.s(4270)
+  val gpui_f2_aon_boat: String get() = Tr.s(4271)
+  val gpui_f2_aon_boat_note: String get() = Tr.s(4272)
+  val gpui_f2_aon_machine: String get() = Tr.s(4273)
+  val gpui_f2_aon_machine_note: String get() = Tr.s(4274)
+  val gpui_f2_chosen: String get() = Tr.s(4275)
+  val gpui_f2_choose: String get() = Tr.s(4276)
+  val gpui_f2_coming: String get() = Tr.s(4277)
+  val gpui_f2_coming_note: String get() = Tr.s(4278)
+  val gpui_f2_project_body: String get() = Tr.s(4279)
+  val gpui_f2_first_message_note: String get() = Tr.s(4280)
+  val gpui_f2_what_agent: String get() = Tr.s(4281)
+  val gpui_f2_folder_note: String get() = Tr.s(4282)
+  val gpui_f2_pair_phone: String get() = Tr.s(4283)
+  val gpui_f2_pair_phone_note: String get() = Tr.s(4284)
+  val gpui_f2_pair_phone_shown: String get() = Tr.s(4285)
+  val gpui_f2_show_code: String get() = Tr.s(4286)
+  val gpui_f2_done_body: String get() = Tr.s(4287)
+  val gpui_f2_open_uber: String get() = Tr.s(4288)
+  val gpui_f2_setup_phone: String get() = Tr.s(4289)
+  val gpui_f2_setup_five: String get() = Tr.s(4290)
+  fun gpui_swarm_row(n: Number, w: Number): String = Tr.f(4291, arrayOf<Any>(n, w))
+  fun gpui_swarm_held(why: Any): String = Tr.f(4292, arrayOf<Any>(why))
+  fun gpui_swarm_state_why(state: Any, why: Any): String = Tr.f(4293, arrayOf<Any>(state, why))
+  val gpui_swarm_new: String get() = Tr.s(4294)
+  val gpui_swarm_add_member: String get() = Tr.s(4295)
+  val gpui_swarm_start: String get() = Tr.s(4296)
+  val gpui_swarm_topic: String get() = Tr.s(4297)
+  val gpui_swarm_goal: String get() = Tr.s(4298)
+  val gpui_swarm_seed: String get() = Tr.s(4299)
+  val gpui_swarm_role: String get() = Tr.s(4300)
+  val gpui_swarm_remove: String get() = Tr.s(4301)
+  val gpui_swarm_over: String get() = Tr.s(4302)
+  val gpui_swarm_none: String get() = Tr.s(4303)
+  val ios_swarm_new: String get() = Tr.s(4304)
+  fun ios_swarm_new_in(project: Any): String = Tr.f(4305, arrayOf<Any>(project))
+  fun ios_swarm_members(n: Number): String = Tr.f(4306, arrayOf<Any>(n))
+  val ios_swarm_state_paused: String get() = Tr.s(4307)
+  val ios_swarm_state_removed: String get() = Tr.s(4308)
+  val ios_swarm_tag_idea: String get() = Tr.s(4309)
+  val ios_swarm_tag_critique: String get() = Tr.s(4310)
+  val ios_swarm_tag_claim: String get() = Tr.s(4311)
+  val ios_swarm_tag_synthesis: String get() = Tr.s(4312)
+  val ios_swarm_reason_circular: String get() = Tr.s(4313)
+  val ios_swarm_reason_budget: String get() = Tr.s(4314)
+  val ios_swarm_reason_person: String get() = Tr.s(4315)
+  val ios_swarm_reason_chatter: String get() = Tr.s(4316)
+  fun ios_swarm_held(why: Any): String = Tr.f(4317, arrayOf<Any>(why))
+  val ios_swarm_topic: String get() = Tr.s(4318)
+  val ios_swarm_goal: String get() = Tr.s(4319)
+  val ios_swarm_seed: String get() = Tr.s(4320)
+  val ios_swarm_role: String get() = Tr.s(4321)
+  val ios_swarm_add: String get() = Tr.s(4322)
+  fun ios_swarm_remove_ask(name: Any): String = Tr.f(4323, arrayOf<Any>(name))
+  val ios_swarm_stop_ask: String get() = Tr.s(4324)
+  val ios_swarm_post: String get() = Tr.s(4325)
+  val ios_image_save: String get() = Tr.s(4326)
+  val ios_image_saved: String get() = Tr.s(4327)
+  val ios_image_denied: String get() = Tr.s(4328)
+  val ios_image_failed: String get() = Tr.s(4329)
+  val ios_image_incoming: String get() = Tr.s(4330)
+  val ios_image_loadfail: String get() = Tr.s(4331)
+  val ios_image_unavailable: String get() = Tr.s(4332)
+  val native_permission_photos_add: String get() = Tr.s(4333)
+  fun ios_buy_ask(project: Any): String = Tr.f(4334, arrayOf<Any>(project))
+  val ios_settings_accounts_usage: String get() = Tr.s(4335)
+  val ios_settings_machines_devices: String get() = Tr.s(4336)
+  val ios_settings_alerts_on: String get() = Tr.s(4337)
+  val ios_settings_alerts_off: String get() = Tr.s(4338)
+  fun ios_settings_accounts_n(n: Number): String = Tr.f(4339, arrayOf<Any>(n))
+  val hub_acct_this_hubs_sign_in: String get() = Tr.s(4340)
+  val hub_acct_no_usage_reading_yet: String get() = Tr.s(4341)
+  val hub_acct_this_hubs_claude_sign_in: String get() = Tr.s(4342)
+  val hub_acct_this_hubs_codex_sign_in: String get() = Tr.s(4343)
+  val hub_acct_claude_cli_login: String get() = Tr.s(4344)
+  val hub_acct_codex_cli_login: String get() = Tr.s(4345)
+  val hub_acct_fable_weekly: String get() = Tr.s(4346)
+  fun ios_acct_also(names: Any): String = Tr.f(4347, arrayOf<Any>(names))
+  val ios_clone_mode: String get() = Tr.s(4348)
+  val ios_clone_repo_hint: String get() = Tr.s(4349)
+  val ios_clone_signin: String get() = Tr.s(4350)
+  val ios_clone_change: String get() = Tr.s(4351)
+  val ios_clone_name: String get() = Tr.s(4352)
+  val ios_clone_thread: String get() = Tr.s(4353)
+  val ios_clone_go: String get() = Tr.s(4354)
+  fun ios_clone_into(dest: Any): String = Tr.f(4355, arrayOf<Any>(dest))
+  val ios_clone_same: String get() = Tr.s(4356)
+  fun ios_clone_title(repo: Any): String = Tr.f(4357, arrayOf<Any>(repo))
+  fun ios_clone_cloned(repo: Any): String = Tr.f(4358, arrayOf<Any>(repo))
+  val ios_clone_cancelled: String get() = Tr.s(4359)
+  fun ios_clone_code(url: Any): String = Tr.f(4360, arrayOf<Any>(url))
+  val ios_clone_signin_starting: String get() = Tr.s(4361)
+  val ios_clone_signin_done: String get() = Tr.s(4362)
+  val ios_clone_signin_open: String get() = Tr.s(4363)
+  val ios_clone_loading: String get() = Tr.s(4364)
+  val mobile_tab_inbox: String get() = Tr.s(4365)
+  val mobile_tab_crew: String get() = Tr.s(4366)
+  val mobile_tab_bench: String get() = Tr.s(4367)
+  val mobile_inbox_clear: String get() = Tr.s(4368)
+  val mobile_inbox_clear_note: String get() = Tr.s(4369)
+  val mobile_inbox_talk_bub: String get() = Tr.s(4370)
+  val mobile_inbox_jump_in: String get() = Tr.s(4371)
+  val mobile_inbox_open_bench: String get() = Tr.s(4372)
+  val mobile_badge_pcb: String get() = Tr.s(4373)
+  val mobile_pill_waiting: String get() = Tr.s(4374)
+  fun mobile_snooze_wakes(time: Any): String = Tr.f(4375, arrayOf<Any>(time))
+  val mobile_bench_all: String get() = Tr.s(4376)
+  val mobile_snooze_for: String get() = Tr.s(4377)
+  val mobile_conn_reconnecting: String get() = Tr.s(4378)
+  val ios_enterprise_alerts: String get() = Tr.s(4379)
+  val ios_enterprise_url_https: String get() = Tr.s(4380)
+  val ios_enterprise_token_enter: String get() = Tr.s(4381)
+  val ios_enterprise_url_invalid: String get() = Tr.s(4382)
+  val ios_enterprise_token_unsaved: String get() = Tr.s(4383)
+  val ios_enterprise_token_refused: String get() = Tr.s(4384)
+  val ios_enterprise_too_many: String get() = Tr.s(4385)
+  val ios_enterprise_server_answered: String get() = Tr.s(4386)
+  val ios_enterprise_registered: String get() = Tr.s(4387)
+  val ios_enterprise_registered_muted: String get() = Tr.s(4388)
+  val ios_enterprise_expired: String get() = Tr.s(4389)
+  val mobile_crew_empty: String get() = Tr.s(4390)
+  val sidebar_sections_needs: String get() = Tr.s(4391)
+  val sidebar_sections_pinned: String get() = Tr.s(4392)
+  val sidebar_sections_active: String get() = Tr.s(4393)
+  val sidebar_sections_quiet: String get() = Tr.s(4394)
+  val sidebar_sections_quiet_hint: String get() = Tr.s(4395)
+  val sidebar_sections_running_word: String get() = Tr.s(4396)
+  val sidebar_sections_recent: String get() = Tr.s(4397)
+  val sidebar_sections_limit: String get() = Tr.s(4398)
+  val sidebar_sections_cut: String get() = Tr.s(4399)
+  val sidebar_sections_monitoring: String get() = Tr.s(4400)
+  val sidebar_sections_stopped: String get() = Tr.s(4401)
+  val sidebar_sections_done: String get() = Tr.s(4402)
+  val sidebar_sections_failed: String get() = Tr.s(4403)
+  val sidebar_sections_rename: String get() = Tr.s(4404)
+  val sidebar_sections_pin: String get() = Tr.s(4405)
+  val sidebar_sections_unpin: String get() = Tr.s(4406)
+  val sidebar_sections_quiet_make: String get() = Tr.s(4407)
+  val sidebar_sections_quiet_back: String get() = Tr.s(4408)
+  val sidebar_sections_quiet_hint2: String get() = Tr.s(4409)
+  fun gpui_sections_move_to(group: Any): String = Tr.f(4410, arrayOf<Any>(group))
+  val sidebar_sections_move: String get() = Tr.s(4411)
+  val sidebar_sections_new_group: String get() = Tr.s(4412)
+  val sidebar_sections_new_group_title: String get() = Tr.s(4413)
+  fun sidebar_sections_remove_ask(project: Any): String = Tr.f(4414, arrayOf<Any>(project))
+  fun gpui_sections_running(n: Number): String = Tr.f(4415, arrayOf<Any>(n))
+  fun gpui_sections_done(n: Number): String = Tr.f(4416, arrayOf<Any>(n))
+  fun gpui_sections_rest(n: Number): String = Tr.f(4417, arrayOf<Any>(n))
+  fun gpui_projects_mech(n: Any): String = Tr.f(4418, arrayOf<Any>(n))
+  val gpui_open_folder: String get() = Tr.s(4419)
+  val gpui_picker_none: String get() = Tr.s(4420)
+  val gpui_picker_key_select: String get() = Tr.s(4421)
+  val gpui_picker_key_into: String get() = Tr.s(4422)
+  val gpui_picker_key_complete: String get() = Tr.s(4423)
+  val gpui_picker_key_open: String get() = Tr.s(4424)
+  val gpui_picker_added: String get() = Tr.s(4425)
+  fun gpui_picker_more_typed(n: Any): String = Tr.f(4426, arrayOf<Any>(n))
+  val gpui_clone_tab: String get() = Tr.s(4427)
+  val gpui_clone_change: String get() = Tr.s(4428)
+  val gpui_clone_thread: String get() = Tr.s(4429)
+  val gpui_clone_retry: String get() = Tr.s(4430)
+  val gpui_clone_signin: String get() = Tr.s(4431)
+  val gpui_clone_back: String get() = Tr.s(4432)
+  val gpui_clone_open_thread: String get() = Tr.s(4433)
+  val gpui_clone_open_project: String get() = Tr.s(4434)
+  val gpui_clone_private: String get() = Tr.s(4435)
+  val gpui_clone_loading: String get() = Tr.s(4436)
+  val gpui_clone_signin_list: String get() = Tr.s(4437)
+  val gpui_clone_signin_code: String get() = Tr.s(4438)
+  val gpui_clone_signin_asking: String get() = Tr.s(4439)
+  val gpui_clone_signin_done: String get() = Tr.s(4440)
+  val gpui_clone_cancel: String get() = Tr.s(4441)
+  val gpui_picker_key_pick: String get() = Tr.s(4442)
+  val gpui_clone_phase_connecting: String get() = Tr.s(4443)
+  val gpui_clone_phase_receiving: String get() = Tr.s(4444)
+  val gpui_clone_phase_resolving: String get() = Tr.s(4445)
+  val gpui_clone_phase_updating: String get() = Tr.s(4446)
+  val gpui_clone_phase_counting: String get() = Tr.s(4447)
+  val gpui_clone_phase_compressing: String get() = Tr.s(4448)
+  val gpui_clone_phase_lfs: String get() = Tr.s(4449)
+  val gpui_clone_phase_adding: String get() = Tr.s(4450)
+  val gpui_clone_phase_starting: String get() = Tr.s(4451)
+  val gpui_assembly: String get() = Tr.s(4452)
+  val gpui_mech: String get() = Tr.s(4453)
+  val gpui_readme: String get() = Tr.s(4454)
+  val gpui_board: String get() = Tr.s(4455)
+  val gpui_schematic: String get() = Tr.s(4456)
+  val gpui_view_three_d: String get() = Tr.s(4457)
+  val gpui_files: String get() = Tr.s(4458)
+  val gpui_usage_bot: String get() = Tr.s(4459)
+  val gpui_usage_tokens: String get() = Tr.s(4460)
+  val gpui_usage_accounts_tip: String get() = Tr.s(4461)
+  val gpui_usage_feeds: String get() = Tr.s(4462)
+  val gpui_usage_lanes: String get() = Tr.s(4463)
+  val gpui_usage_turn_live: String get() = Tr.s(4464)
+  val gpui_usage_chat: String get() = Tr.s(4465)
+  val gpui_usage_today: String get() = Tr.s(4466)
+  val gpui_usage_prefs: String get() = Tr.s(4467)
+  val gpui_usage_handover: String get() = Tr.s(4468)
+  val gpui_usage_none_waiting: String get() = Tr.s(4469)
+  val gpui_usage_session: String get() = Tr.s(4470)
+  val gpui_usage_last_handover: String get() = Tr.s(4471)
+  val gpui_usage_triage: String get() = Tr.s(4472)
+  val gpui_usage_office: String get() = Tr.s(4473)
+  val gpui_usage_office_lower: String get() = Tr.s(4474)
+  val gpui_usage_compact: String get() = Tr.s(4475)
+  val gpui_usage_switch: String get() = Tr.s(4476)
+  val gpui_usage_note: String get() = Tr.s(4477)
+  val gpui_usage_lanes_note: String get() = Tr.s(4478)
+  val gpui_usage_lanes_routines: String get() = Tr.s(4479)
+  val gpui_usage_turns_many: String get() = Tr.s(4480)
+  val gpui_usage_turns_full: String get() = Tr.s(4481)
+  val gpui_usage_turns_one: String get() = Tr.s(4482)
+  fun gpui_usage_turns_n(n: Any): String = Tr.f(4483, arrayOf<Any>(n))
+  fun gpui_usage_left(n: Any): String = Tr.f(4484, arrayOf<Any>(n))
+  fun gpui_usage_of(a: Any, b: Any): String = Tr.f(4485, arrayOf<Any>(a, b))
+  fun gpui_usage_context(n: Any): String = Tr.f(4486, arrayOf<Any>(n))
+  val gpui_usage_noread: String get() = Tr.s(4487)
+  fun gpui_mgmt_bom_summary(parts: Number, lines: Number): String = Tr.f(4488, arrayOf<Any>(parts, lines))
+  fun gpui_mgmt_bom_more(n: Number): String = Tr.f(4489, arrayOf<Any>(n))
+  val gpui_mgmt_dock_right: String get() = Tr.s(4490)
+  val gpui_mgmt_dock_bottom: String get() = Tr.s(4491)
+  val gpui_mgmt_close: String get() = Tr.s(4492)
+  val gpui_mgmt_bom_saved: String get() = Tr.s(4493)
+  val gpui_mgmt_bom_reading: String get() = Tr.s(4494)
+  val gpui_mgmt_bom_nomatch: String get() = Tr.s(4495)
+  val gpui_mgmt_bom_nompn: String get() = Tr.s(4496)
+  val gpui_mgmt_filter: String get() = Tr.s(4497)
+  val gpui_mgmt_bom_noparts: String get() = Tr.s(4498)
+  val gpui_mgmt_bom_dnp: String get() = Tr.s(4499)
+  val gpui_mgmt_fab_tab: String get() = Tr.s(4500)
+  val gpui_mgmt_fab_drc_current: String get() = Tr.s(4501)
+  val gpui_mgmt_fab_drc_stale: String get() = Tr.s(4502)
+  val gpui_mgmt_fab_drc_update: String get() = Tr.s(4503)
+  val gpui_mgmt_fab_drc_none: String get() = Tr.s(4504)
+  val gpui_mgmt_fab_drc_write: String get() = Tr.s(4505)
+  val gpui_mgmt_fab_drc_noproject: String get() = Tr.s(4506)
+  val gpui_mgmt_fab_tier_extra: String get() = Tr.s(4507)
+  val gpui_mgmt_fab_tier_free: String get() = Tr.s(4508)
+  val gpui_mgmt_fab_reading: String get() = Tr.s(4509)
+  val gpui_mgmt_fab_thefab: String get() = Tr.s(4510)
+  val gpui_mgmt_fab_refresh: String get() = Tr.s(4511)
+  val gpui_mgmt_fab_apply: String get() = Tr.s(4512)
+  val gpui_mgmt_fab_changed: String get() = Tr.s(4513)
+  val gpui_mgmt_fab_seen: String get() = Tr.s(4514)
+  val gpui_mgmt_fab_limit: String get() = Tr.s(4515)
+  val gpui_mgmt_fab_free: String get() = Tr.s(4516)
+  val gpui_mgmt_fab_extra: String get() = Tr.s(4517)
+  val gpui_mgmt_fab_readcol: String get() = Tr.s(4518)
+  val gpui_mgmt_fab_derived: String get() = Tr.s(4519)
+  fun gpui_mgmt_fab_suggestion(what: Any, project: Any, fab: Any): String = Tr.f(4520, arrayOf<Any>(what, project, fab))
+  fun gpui_mgmt_fab_read(rev: Any, day: Any): String = Tr.f(4521, arrayOf<Any>(rev, day))
+  val gpui_mgmt_fab_reviewing: String get() = Tr.s(4522)
+  val gpui_mgmt_fab_noreview: String get() = Tr.s(4523)
+  val gpui_mgmt_fab_findings: String get() = Tr.s(4524)
+  val gpui_mgmt_fab_reviewbtn: String get() = Tr.s(4525)
+  val gpui_mgmt_fab_judge: String get() = Tr.s(4526)
+  val gpui_mgmt_plan_reading: String get() = Tr.s(4527)
+  val gpui_mgmt_plan_none: String get() = Tr.s(4528)
+  fun gpui_mgmt_plan_awaiting(n: Number): String = Tr.f(4529, arrayOf<Any>(n))
+  val gpui_mgmt_plan_nothing: String get() = Tr.s(4530)
+  val gpui_mgmt_plan_saved: String get() = Tr.s(4531)
+  val gpui_mgmt_plan_all: String get() = Tr.s(4532)
+  val gpui_mgmt_plan_stop: String get() = Tr.s(4533)
+  val gpui_mgmt_plan_hide: String get() = Tr.s(4534)
+  val gpui_mgmt_plan_show: String get() = Tr.s(4535)
+  val gpui_mgmt_plan_done: String get() = Tr.s(4536)
+  val gpui_mgmt_plan_layer: String get() = Tr.s(4537)
+  val gpui_mgmt_plan_reject: String get() = Tr.s(4538)
+  val gpui_mgmt_plan_keysnote: String get() = Tr.s(4539)
+  fun gpui_mgmt_plan_reference(layer: Any): String = Tr.f(4540, arrayOf<Any>(layer))
+  fun gpui_mgmt_plan_nets(n: Number): String = Tr.f(4541, arrayOf<Any>(n))
+  val gpui_mgmt_plan_tab: String get() = Tr.s(4542)
+  val gpui_mgmt_plan_before: String get() = Tr.s(4543)
+  val gpui_mgmt_plan_onwords: String get() = Tr.s(4544)
+  val gpui_mgmt_plan_offwords: String get() = Tr.s(4545)
+  fun gpui_mgmt_plan_elsewhere(board: Any): String = Tr.f(4546, arrayOf<Any>(board))
+  val gpui_mgmt_plan_openboard: String get() = Tr.s(4547)
+  val gpui_mgmt_plan_noboard: String get() = Tr.s(4548)
+  val gpui_mgmt_plan_drawn: String get() = Tr.s(4549)
+  val gpui_pick_planonce: String get() = Tr.s(4550)
+  val gpui_pick_planonce_note: String get() = Tr.s(4551)
+  val hub_view_board_unlisted: String get() = Tr.s(4552)
+  val gpui_mgmt_bom_stocknote: String get() = Tr.s(4553)
+  val hub_order_pick_more: String get() = Tr.s(4554)
+  val hub_order_pick_phone: String get() = Tr.s(4555)
+  val hub_order_pick_go: String get() = Tr.s(4556)
+  val gpui_plan_before_routing_desc: String get() = Tr.s(4557)
+  fun gpui_mgmt_bom_shared(others: Any): String = Tr.f(4558, arrayOf<Any>(others))
+  fun gpui_mgmt_fab_review(must: Any, should: Any, notes: Any): String = Tr.f(4559, arrayOf<Any>(must, should, notes))
+  fun gpui_mgmt_fab_stackup(id: Any, w: Any): String = Tr.f(4560, arrayOf<Any>(id, w))
+  val gpui_mgmt_fab_proposed: String get() = Tr.s(4561)
+  val gpui_mgmt_fab_use: String get() = Tr.s(4562)
+  val gpui_keys_mgmt_bom: String get() = Tr.s(4563)
+  val gpui_keys_mgmt_checks: String get() = Tr.s(4564)
+  val gpui_keys_mgmt_life: String get() = Tr.s(4565)
+  val gpui_mgmt_checks_reading: String get() = Tr.s(4566)
+  val gpui_mgmt_checks_searching: String get() = Tr.s(4567)
+  val gpui_mgmt_checks_run: String get() = Tr.s(4568)
+  val gpui_mgmt_checks_running: String get() = Tr.s(4569)
+  fun gpui_mgmt_checks_behind(what: Any): String = Tr.f(4570, arrayOf<Any>(what))
+  val gpui_mgmt_checks_stale: String get() = Tr.s(4571)
+  val gpui_mgmt_checks_liveunsaved: String get() = Tr.s(4572)
+  fun gpui_mgmt_checks_waiting(why: Any): String = Tr.f(4573, arrayOf<Any>(why))
+  fun gpui_mgmt_checks_failed(why: Any): String = Tr.f(4574, arrayOf<Any>(why))
+  val gpui_mgmt_checks_all: String get() = Tr.s(4575)
+  val gpui_mgmt_checks_errors: String get() = Tr.s(4576)
+  val gpui_mgmt_checks_warnings: String get() = Tr.s(4577)
+  val gpui_mgmt_checks_excluded: String get() = Tr.s(4578)
+  val gpui_mgmt_checks_fix: String get() = Tr.s(4579)
+  val gpui_mgmt_checks_reexport: String get() = Tr.s(4580)
+  fun gpui_mgmt_checks_more(n: Number): String = Tr.f(4581, arrayOf<Any>(n))
+  val gpui_mgmt_checks_fewer: String get() = Tr.s(4582)
+  val gpui_mgmt_checks_none: String get() = Tr.s(4583)
+  val gpui_mgmt_checks_nomatch: String get() = Tr.s(4584)
+  val gpui_mgmt_checks_library: String get() = Tr.s(4585)
+  val gpui_mgmt_checks_withlib: String get() = Tr.s(4586)
+  val gpui_mgmt_checks_fullrun: String get() = Tr.s(4587)
+  val gpui_mgmt_checks_allsources: String get() = Tr.s(4588)
+  val gpui_mgmt_checks_judged: String get() = Tr.s(4589)
+  val gpui_mgmt_bom_dnp_tip: String get() = Tr.s(4590)
+  val gpui_mgmt_bom_writing: String get() = Tr.s(4591)
+  val gpui_mgmt_bom_inkicad: String get() = Tr.s(4592)
+  val gpui_mgmt_bom_saved_file: String get() = Tr.s(4593)
+  val gpui_mgmt_bom_fab: String get() = Tr.s(4594)
+  val gpui_mgmt_bom_mpn_ph: String get() = Tr.s(4595)
+  val gpui_mgmt_bom_fab_ph: String get() = Tr.s(4596)
+  fun gpui_mgmt_bom_each(price: Any, n: Any): String = Tr.f(4597, arrayOf<Any>(price, n))
+  fun gpui_mgmt_bom_out(n: Any, need: Any): String = Tr.f(4598, arrayOf<Any>(n, need))
+  fun gpui_mgmt_bom_low(n: Any): String = Tr.f(4599, arrayOf<Any>(n))
+  fun gpui_mgmt_bom_in(n: Any): String = Tr.f(4600, arrayOf<Any>(n))
+  fun gpui_mgmt_bom_cost(cost: Any): String = Tr.f(4601, arrayOf<Any>(cost))
+  fun gpui_mgmt_bom_cost_least(cost: Any): String = Tr.f(4602, arrayOf<Any>(cost))
+  val gpui_mgmt_bom_checking: String get() = Tr.s(4603)
+  val gpui_mgmt_bom_notknown: String get() = Tr.s(4604)
+  val gpui_mgmt_bom_stock: String get() = Tr.s(4605)
+  val gpui_mgmt_bom_alts: String get() = Tr.s(4606)
+  val gpui_mgmt_bom_alts_looking: String get() = Tr.s(4607)
+  val gpui_mgmt_bom_alts_none: String get() = Tr.s(4608)
+  val gpui_mgmt_bom_alts_use: String get() = Tr.s(4609)
+  val gpui_mgmt_bom_class_basic: String get() = Tr.s(4610)
+  val gpui_mgmt_bom_class_extended: String get() = Tr.s(4611)
+  val gpui_mgmt_bom_class_preferred: String get() = Tr.s(4612)
+  val gpui_mgmt_bom_notinstock: String get() = Tr.s(4613)
+  val gpui_mgmt_bom_off: String get() = Tr.s(4614)
+  fun gpui_mgmt_life_since(day: Any, n: Number): String = Tr.f(4615, arrayOf<Any>(day, n))
+  fun gpui_mgmt_life_one(day: Any): String = Tr.f(4616, arrayOf<Any>(day))
+  fun gpui_mgmt_life_now(cost: Any, n: Any, lines: Any): String = Tr.f(4617, arrayOf<Any>(cost, n, lines))
+  fun gpui_mgmt_life_part_now(stock: Any, price: Any): String = Tr.f(4618, arrayOf<Any>(stock, price))
+  fun gpui_mgmt_life_instock(lines: Any): String = Tr.f(4619, arrayOf<Any>(lines))
+  val gpui_mgmt_life_board: String get() = Tr.s(4620)
+  val gpui_mgmt_life_price: String get() = Tr.s(4621)
+  val gpui_mgmt_life_active: String get() = Tr.s(4622)
+  val gpui_mgmt_life_nrnd: String get() = Tr.s(4623)
+  val gpui_mgmt_life_eol: String get() = Tr.s(4624)
+  val gpui_mgmt_life_unknown: String get() = Tr.s(4625)
+  val gpui_mgmt_life_nolines: String get() = Tr.s(4626)
+  val gpui_mgmt_life_noread: String get() = Tr.s(4627)
+  val gpui_mgmt_life_reading: String get() = Tr.s(4628)
+  val gpui_mgmt_life_nopart: String get() = Tr.s(4629)
+  val gpui_mgmt_life_tab: String get() = Tr.s(4630)
+  val gpui_mgmt_bom_paused: String get() = Tr.s(4631)
+  val gpui_mgmt_bom_paused_tip: String get() = Tr.s(4632)
+  val gpui_keys_mgmt_fab: String get() = Tr.s(4633)
+  val gpui_mgmt_bom_putback: String get() = Tr.s(4634)
+  val gpui_mgmt_bom_nochange: String get() = Tr.s(4635)
+  val gpui_mgmt_bom_deferred: String get() = Tr.s(4636)
+  val gpui_mgmt_bom_inkicad_save: String get() = Tr.s(4637)
+  val gpui_mgmt_bom_undo_tip: String get() = Tr.s(4638)
+  val gpui_mgmt_bom_undo: String get() = Tr.s(4639)
+  fun gpui_mgmt_checks_on(host: Any): String = Tr.f(4640, arrayOf<Any>(host))
+  val gpui_gerbers: String get() = Tr.s(4641)
+  val gpui_gerbers_vs: String get() = Tr.s(4642)
+  val gpui_gerbers_vs_tip: String get() = Tr.s(4643)
+  val gpui_gerbers_gerbview: String get() = Tr.s(4644)
+  val gpui_gerbers_gerbview_tip: String get() = Tr.s(4645)
+  val gpui_mgmt_bom_saved_state: String get() = Tr.s(4646)
+  val gpui_mgmt_bom_live_tip: String get() = Tr.s(4647)
+  val gpui_mgmt_bom_saved_tip: String get() = Tr.s(4648)
+  val gpui_mgmt_bom_price: String get() = Tr.s(4649)
+  val gpui_mgmt_bom_class: String get() = Tr.s(4650)
+  fun gpui_mgmt_life_unknown_n(n: Any): String = Tr.f(4651, arrayOf<Any>(n))
+  fun gpui_mgmt_life_unknown_tip(a: Any, b: Any): String = Tr.f(4652, arrayOf<Any>(a, b))
+  fun gpui_mgmt_bom_stock_out(n: Any): String = Tr.f(4653, arrayOf<Any>(n))
+  fun gpui_mgmt_bom_stock_low(n: Any): String = Tr.f(4654, arrayOf<Any>(n))
+  val gpui_gerbers_boardonly: String get() = Tr.s(4655)
+  val gpui_gerbers_gerbersonly: String get() = Tr.s(4656)
+  fun gpui_mgmt_life_price_since(day: Any): String = Tr.f(4657, arrayOf<Any>(day))
+  fun gpui_streamer_account(n: Any): String = Tr.f(4658, arrayOf<Any>(n))
+  fun gpui_streamer_project(n: Any): String = Tr.f(4659, arrayOf<Any>(n))
+  fun gpui_streamer_group(n: Any): String = Tr.f(4660, arrayOf<Any>(n))
+  val gpui_streamer_mode: String get() = Tr.s(4661)
+  val gpui_streamer_section: String get() = Tr.s(4662)
+  val gpui_streamer_off: String get() = Tr.s(4663)
+  val gpui_streamer_on: String get() = Tr.s(4664)
+  val gpui_streamer_tip: String get() = Tr.s(4665)
+  val gpui_streamer_shared: String get() = Tr.s(4666)
+  val gpui_streamer_qr: String get() = Tr.s(4667)
+  val gpui_streamer_note: String get() = Tr.s(4668)
+  val gpui_streamer_share: String get() = Tr.s(4669)
+  val gpui_streamer_apps: String get() = Tr.s(4670)
+  val gpui_streamer_apps_note: String get() = Tr.s(4671)
+  val gpui_streamer_linux: String get() = Tr.s(4672)
+  val gpui_streamer_mac: String get() = Tr.s(4673)
+  val gpui_streamer_win: String get() = Tr.s(4674)
+  val gpui_f2_uber_title: String get() = Tr.s(4675)
+  val gpui_f2_uber_body: String get() = Tr.s(4676)
+  val gpui_f2_uber_say: String get() = Tr.s(4677)
+  val gpui_f2_uber_here: String get() = Tr.s(4678)
+  val gpui_f2_uber_err_name: String get() = Tr.s(4679)
+  val gpui_f2_uber_err_color: String get() = Tr.s(4680)
+  val gpui_f2_uber_color: String get() = Tr.s(4681)
+  val gpui_f2_uber_own: String get() = Tr.s(4682)
+  val gpui_f2_uber_custom: String get() = Tr.s(4683)
+  val gpui_f2_uber_hex: String get() = Tr.s(4684)
+  val gpui_f2_uber_use: String get() = Tr.s(4685)
+  val gpui_f2_uber_shuffle: String get() = Tr.s(4686)
+  val gpui_f2_uber_auto: String get() = Tr.s(4687)
+  val gpui_f2_uber_savename: String get() = Tr.s(4688)
+  val gpui_f2_uber_p_ginger: String get() = Tr.s(4689)
+  val gpui_f2_uber_p_cream: String get() = Tr.s(4690)
+  val gpui_f2_uber_p_smoke: String get() = Tr.s(4691)
+  val gpui_f2_uber_p_midnight: String get() = Tr.s(4692)
+  val gpui_f2_uber_p_cocoa: String get() = Tr.s(4693)
+  val gpui_f2_uber_p_sky: String get() = Tr.s(4694)
+  val gpui_f2_uber_p_lilac: String get() = Tr.s(4695)
+  val gpui_f2_uber_p_rose: String get() = Tr.s(4696)
+  val gpui_f2_uber_p_mint: String get() = Tr.s(4697)
+  val gpui_f2_uber_p_cherry: String get() = Tr.s(4698)
+  val gpui_simulation: String get() = Tr.s(4699)
+  val gpui_c_sheets_find: String get() = Tr.s(4700)
+  fun history_snap(turn: Any): String = Tr.f(4701, arrayOf<Any>(turn))
+  val history_ref_snap: String get() = Tr.s(4702)
+  val thread_restore_action: String get() = Tr.s(4703)
+  val thread_restore_ask: String get() = Tr.s(4704)
+  val thread_restore_note: String get() = Tr.s(4705)
+  val thread_restore_go: String get() = Tr.s(4706)
+  val mouse_mouseandtrackpad0: String get() = Tr.s(4707)
+  val mouse_zoomdirection1: String get() = Tr.s(4708)
+  val mouse_appliestothewheelandatrackpads2: String get() = Tr.s(4709)
+  val mouse_normal3: String get() = Tr.s(4710)
+  val mouse_inverted4: String get() = Tr.s(4711)
+  val mouse_boardandschematic5: String get() = Tr.s(4712)
+  val mouse_k3dandstep6: String get() = Tr.s(4713)
+  val mouse_changedfromitspreseteachinputd7: String get() = Tr.s(4714)
+  val mouse_apresetsetseveryinputbeloweach8: String get() = Tr.s(4715)
+  val mouse_legacy10: String get() = Tr.s(4716)
+  val mouse_leftdrag11: String get() = Tr.s(4717)
+  val mouse_middledrag12: String get() = Tr.s(4718)
+  val mouse_rightdrag13: String get() = Tr.s(4719)
+  val mouse_shiftleftdrag14: String get() = Tr.s(4720)
+  val mouse_ctrlleftdrag15: String get() = Tr.s(4721)
+  val mouse_altleftdrag16: String get() = Tr.s(4722)
+  val mouse_wheel17: String get() = Tr.s(4723)
+  val mouse_shiftwheel18: String get() = Tr.s(4724)
+  val mouse_ctrlwheel19: String get() = Tr.s(4725)
+  val mouse_altwheel20: String get() = Tr.s(4726)
+  val mouse_nothing21: String get() = Tr.s(4727)
+  val mouse_pan22: String get() = Tr.s(4728)
+  val mouse_pansideways23: String get() = Tr.s(4729)
+  val mouse_panupanddown24: String get() = Tr.s(4730)
+  val mouse_zoom25: String get() = Tr.s(4731)
+  val mouse_rotate26: String get() = Tr.s(4732)
+  val mouse_roll27: String get() = Tr.s(4733)
+  val mouse_select28: String get() = Tr.s(4734)
+  val mouse_aclickwithoutmovingwithnokeyhe29: String get() = Tr.s(4735)
+  val mouse_leftbutton30: String get() = Tr.s(4736)
+  val mouse_middlebutton31: String get() = Tr.s(4737)
+  val mouse_rightbutton32: String get() = Tr.s(4738)
+  val mouse_twofingerscroll33: String get() = Tr.s(4739)
+  val mouse_atrackpadstwofingerswithctrlhe34: String get() = Tr.s(4740)
+  val mouse_pans35: String get() = Tr.s(4741)
+  val mouse_isthewheel36: String get() = Tr.s(4742)
+  val mouse_pinch37: String get() = Tr.s(4743)
+  val mouse_atrackpadpinch38: String get() = Tr.s(4744)
+  val mouse_zooms39: String get() = Tr.s(4745)
+  val mouse_chooseaninputforitabove41: String get() = Tr.s(4746)
+  val mouse_nothingissettopan42: String get() = Tr.s(4747)
+  val mouse_nothingissettozoom43: String get() = Tr.s(4748)
+  val mouse_nothingissettorotate44: String get() = Tr.s(4749)
+  val gpui_review_mark: String get() = Tr.s(4750)
+  val gpui_review_mark_tip: String get() = Tr.s(4751)
+  val gpui_review_why: String get() = Tr.s(4752)
+  val gpui_review_allow: String get() = Tr.s(4753)
+  val gpui_review_allow_tip: String get() = Tr.s(4754)
+  val gpui_review_off: String get() = Tr.s(4755)
+  val gpui_review_again: String get() = Tr.s(4756)
+  val gpui_review_again_tip: String get() = Tr.s(4757)
+  val gpui_rail_no_board: String get() = Tr.s(4758)
+  val gpui_rail_no_schematic: String get() = Tr.s(4759)
+  val gpui_rail_split_needs_both: String get() = Tr.s(4760)
+  val gpui_rail_no_mech: String get() = Tr.s(4761)
+  val gpui_rail_no_thread: String get() = Tr.s(4762)
+  val gpui_panestate_next_board: String get() = Tr.s(4763)
+  val gpui_panestate_next_schematic: String get() = Tr.s(4764)
+  val gpui_panestate_next_solid: String get() = Tr.s(4765)
+  val gpui_panestate_empty_gerbers: String get() = Tr.s(4766)
+  val gpui_panestate_next_gerbers: String get() = Tr.s(4767)
+  val gpui_panestate_gerbers_noboard: String get() = Tr.s(4768)
+  val gpui_panestate_gerbers_noboard_next: String get() = Tr.s(4769)
+  val gpui_panestate_empty_mech: String get() = Tr.s(4770)
+  val gpui_panestate_next_mech: String get() = Tr.s(4771)
+  val gpui_panestate_loading_split: String get() = Tr.s(4772)
+  val gpui_panestate_retrying: String get() = Tr.s(4773)
+  val gpui_hub_view_notready: String get() = Tr.s(4774)
+  val gpui_hub_view_staleconn: String get() = Tr.s(4775)
+  val gpui_hub_view_unavailable: String get() = Tr.s(4776)
+  val settings_designmode_label: String get() = Tr.s(4777)
+  val settings_designmode_viewer: String get() = Tr.s(4778)
+  val settings_designmode_kicad: String get() = Tr.s(4779)
+  val settings_designmode_note: String get() = Tr.s(4780)
+  val review_empty_title: String get() = Tr.s(4781)
+  val review_empty_next: String get() = Tr.s(4782)
+  val viewer_diff_threadchanges: String get() = Tr.s(4783)
+  val viewer_layout_refusal_locked: String get() = Tr.s(4784)
+  val viewer_layout_refusal_toosmall: String get() = Tr.s(4785)
+  val viewer_layout_refusal_onekicad: String get() = Tr.s(4786)
+  val viewer_layout_refusal_incompatibleoverlay: String get() = Tr.s(4787)
+  val viewer_layout_refusal_notfound: String get() = Tr.s(4788)
+  val viewer_layout_refusal_nooverlay: String get() = Tr.s(4789)
+  val viewer_layout_refusal_invalidsource: String get() = Tr.s(4790)
+  val viewer_layout_refusal_sametile: String get() = Tr.s(4791)
+  val viewer_layout_refusal_invalidratio: String get() = Tr.s(4792)
+  val viewer_layout_refusal_duplicateid: String get() = Tr.s(4793)
+  val viewer_layout_refusal_unknownframe: String get() = Tr.s(4794)
+  val viewer_layout_refusal_invalidinput: String get() = Tr.s(4795)
+  val viewer_layout_refusal_toomany: String get() = Tr.s(4796)
+  val viewer_layout_refusal_toomanysources: String get() = Tr.s(4797)
+  val viewer_layout_refusal_unresolvedversion: String get() = Tr.s(4798)
+  val viewer_layout_refusal_nohistory: String get() = Tr.s(4799)
+  val viewer_layout_refusal_linked: String get() = Tr.s(4800)
+  val viewer_layout_refusal_notondevice: String get() = Tr.s(4801)
+  val viewer_layout_refusal_starting: String get() = Tr.s(4802)
+  val viewer_footprinteditor: String get() = Tr.s(4803)
+  val viewer_symboleditor: String get() = Tr.s(4804)
+  val web_clone_tab: String get() = Tr.s(4805)
+  val web_clone_repo_placeholder: String get() = Tr.s(4806)
+  val web_clone_private: String get() = Tr.s(4807)
+  val web_clone_signin: String get() = Tr.s(4808)
+  val web_clone_signin_wait: String get() = Tr.s(4809)
+  val web_clone_signin_enter: String get() = Tr.s(4810)
+  val web_clone_signin_done: String get() = Tr.s(4811)
+  val web_clone_copied: String get() = Tr.s(4812)
+  val web_clone_change_folder: String get() = Tr.s(4813)
+  val web_clone_folder_name: String get() = Tr.s(4814)
+  val web_clone_start_thread: String get() = Tr.s(4815)
+  fun web_clone_first(text: Any): String = Tr.f(4816, arrayOf<Any>(text))
+  val web_clone_same: String get() = Tr.s(4817)
+  val web_clone_go: String get() = Tr.s(4818)
+  fun web_clone_cloning(repo: Any, dest: Any): String = Tr.f(4819, arrayOf<Any>(repo, dest))
+  fun web_clone_cloned(repo: Any, dest: Any): String = Tr.f(4820, arrayOf<Any>(repo, dest))
+  fun web_clone_stopped(repo: Any): String = Tr.f(4821, arrayOf<Any>(repo))
+  val web_clone_retry: String get() = Tr.s(4822)
+  val web_clone_back: String get() = Tr.s(4823)
+  val web_clone_open_thread: String get() = Tr.s(4824)
+  val web_clone_open_project: String get() = Tr.s(4825)
+  fun web_clone_add_dir(dir: Any): String = Tr.f(4826, arrayOf<Any>(dir))
+  fun web_clone_use_dir(dir: Any): String = Tr.f(4827, arrayOf<Any>(dir))
+  val web_clone_up: String get() = Tr.s(4828)
+  val web_clone_loading: String get() = Tr.s(4829)
+  val web_clone_no_folders: String get() = Tr.s(4830)
+  fun gpui_c_kicad_opening(editor: Any, job: Any, secs: Any): String = Tr.f(4831, arrayOf<Any>(editor, job, secs))
+  fun gpui_c_kicad_openingbare(editor: Any, secs: Any): String = Tr.f(4832, arrayOf<Any>(editor, secs))
+  fun gpui_c_kicad_openfailed(editor: Any): String = Tr.f(4833, arrayOf<Any>(editor))
+  val viewer_tile_rail_add: String get() = Tr.s(4834)
+  val viewer_tile_add: String get() = Tr.s(4835)
+  val viewer_tile_maximize: String get() = Tr.s(4836)
+  val viewer_tile_restore: String get() = Tr.s(4837)
+  val viewer_tile_focus: String get() = Tr.s(4838)
+  val viewer_tile_embedded: String get() = Tr.s(4839)
+  val viewer_tile_simulation_single: String get() = Tr.s(4840)
+  val viewer_tile_add_tip: String get() = Tr.s(4841)
+  val viewer_tile_left: String get() = Tr.s(4842)
+  val viewer_tile_right: String get() = Tr.s(4843)
+  val viewer_tile_top: String get() = Tr.s(4844)
+  val viewer_tile_bottom: String get() = Tr.s(4845)
+  val web_pair_subtitle: String get() = Tr.s(4846)
+  val web_pair_name: String get() = Tr.s(4847)
+  val web_pair_request: String get() = Tr.s(4848)
+  val web_pair_code: String get() = Tr.s(4849)
+  fun web_pair_approve_in(time: Any): String = Tr.f(4850, arrayOf<Any>(time))
+  val web_pair_expired: String get() = Tr.s(4851)
+  val web_pair_approved: String get() = Tr.s(4852)
+  val web_pair_denied: String get() = Tr.s(4853)
+  val web_pair_cancelled: String get() = Tr.s(4854)
+  val web_pair_requesting: String get() = Tr.s(4855)
+  fun web_pair_failed(status: Any): String = Tr.f(4856, arrayOf<Any>(status))
+  val web_pair_ratelimited: String get() = Tr.s(4857)
+  val web_pair_nocode: String get() = Tr.s(4858)
+  val web_pair_unreachable: String get() = Tr.s(4859)
+  val web_chat_loading: String get() = Tr.s(4860)
+  val web_chat_choose: String get() = Tr.s(4861)
+  val web_chat_empty: String get() = Tr.s(4862)
+  val web_chat_streaming: String get() = Tr.s(4863)
+  fun web_chat_finished(time: Any): String = Tr.f(4864, arrayOf<Any>(time))
+  fun web_chat_finished_dur(time: Any, dur: Any): String = Tr.f(4865, arrayOf<Any>(time, dur))
+  val web_chat_answer_placeholder: String get() = Tr.s(4866)
+  val web_chat_answer_btn: String get() = Tr.s(4867)
+  fun web_chat_answered(answer: Any): String = Tr.f(4868, arrayOf<Any>(answer))
+  val web_chat_review_mode: String get() = Tr.s(4869)
+  val web_composer_attach: String get() = Tr.s(4870)
+  val web_composer_voice: String get() = Tr.s(4871)
+  fun web_composer_unsupported(type: Any): String = Tr.f(4872, arrayOf<Any>(type))
+  fun web_composer_maximages(max: Any): String = Tr.f(4873, arrayOf<Any>(max))
+  val web_logout_failed: String get() = Tr.s(4874)
+  val thread_context_title: String get() = Tr.s(4875)
+  val thread_context_instructions: String get() = Tr.s(4876)
+  val thread_context_system: String get() = Tr.s(4877)
+  val thread_context_skills: String get() = Tr.s(4878)
+  val thread_context_mcp: String get() = Tr.s(4879)
+  val thread_context_mcp_short: String get() = Tr.s(4880)
+  val thread_context_reading: String get() = Tr.s(4881)
+  val thread_context_none_instructions: String get() = Tr.s(4882)
+  val thread_context_none_mcp: String get() = Tr.s(4883)
+  val thread_context_native_note: String get() = Tr.s(4884)
+  val thread_context_copy: String get() = Tr.s(4885)
+  val thread_context_copied: String get() = Tr.s(4886)
+  val thread_context_base: String get() = Tr.s(4887)
+  val thread_context_injected_label: String get() = Tr.s(4888)
+  val thread_context_index: String get() = Tr.s(4889)
+  val thread_context_scope_user: String get() = Tr.s(4890)
+  val thread_context_scope_bundled: String get() = Tr.s(4891)
+  val thread_context_native: String get() = Tr.s(4892)
+  val thread_context_injected: String get() = Tr.s(4893)
+  val thread_context_cross: String get() = Tr.s(4894)
+  val thread_context_explicit: String get() = Tr.s(4895)
+  val thread_context_untrusted: String get() = Tr.s(4896)
+  val thread_context_invalid: String get() = Tr.s(4897)
+  val thread_context_trust: String get() = Tr.s(4898)
+  val thread_context_enable: String get() = Tr.s(4899)
+  val thread_context_disable: String get() = Tr.s(4900)
+  fun thread_context_size(bytes: Any, tokens: Any): String = Tr.f(4901, arrayOf<Any>(bytes, tokens))
+  val thread_context_unreachable: String get() = Tr.s(4902)
+  val gpui_planmode_top_once: String get() = Tr.s(4903)
+  val gpui_planmode_top_planning: String get() = Tr.s(4904)
+  val gpui_planmode_top_pending: String get() = Tr.s(4905)
+  val gpui_planmode_top_executing: String get() = Tr.s(4906)
+  val gpui_planmode_tip: String get() = Tr.s(4907)
+  val gpui_planmode_chip_building: String get() = Tr.s(4908)
+  val gpui_planmode_chip_once: String get() = Tr.s(4909)
+  val gpui_planmode_bar_once: String get() = Tr.s(4910)
+  val gpui_planmode_bar_always: String get() = Tr.s(4911)
+  val gpui_planmode_bar_planning: String get() = Tr.s(4912)
+  val gpui_planmode_bar_pending: String get() = Tr.s(4913)
+  val gpui_planmode_bar_executing: String get() = Tr.s(4914)
+  val gpui_planmode_scope_once: String get() = Tr.s(4915)
+  val gpui_planmode_scope_always: String get() = Tr.s(4916)
+  val gpui_ask_plan_ready: String get() = Tr.s(4917)
+  val gpui_ask_plan_revise: String get() = Tr.s(4918)
+  val gpui_ask_plan_sendrev: String get() = Tr.s(4919)
+  val gpui_ask_plan_reviseph: String get() = Tr.s(4920)
+  val gpui_mgmt_plan_st_blocked: String get() = Tr.s(4921)
+  val gpui_mgmt_plan_st_routing: String get() = Tr.s(4922)
+  val gpui_mgmt_plan_st_awaiting: String get() = Tr.s(4923)
+  val gpui_mgmt_plan_st_verified: String get() = Tr.s(4924)
+  val gpui_mgmt_plan_st_routed: String get() = Tr.s(4925)
+  val gpui_mgmt_plan_st_approved: String get() = Tr.s(4926)
+  val gpui_mgmt_plan_st_partial: String get() = Tr.s(4927)
+  val gpui_mgmt_plan_st_rejected: String get() = Tr.s(4928)
+  val gpui_mgmt_plan_st_empty: String get() = Tr.s(4929)
+  val gpui_mgmt_plan_refused: String get() = Tr.s(4930)
+  val gpui_mgmt_plan_emptysub: String get() = Tr.s(4931)
+  val gpui_mgmt_plan_verify: String get() = Tr.s(4932)
+  val gpui_mgmt_plan_reqplain: String get() = Tr.s(4933)
+  fun gpui_mgmt_plan_requested(what: Any): String = Tr.f(4934, arrayOf<Any>(what))
+  val gpui_mgmt_plan_stackup: String get() = Tr.s(4935)
+  val gpui_keys_planmode: String get() = Tr.s(4936)
+  val gpui_keys_mgmt_plan: String get() = Tr.s(4937)
+  fun web_plan_awaiting(n: Any): String = Tr.f(4938, arrayOf<Any>(n))
+  val web_plan_net_one: String get() = Tr.s(4939)
+  fun web_plan_nets(n: Any): String = Tr.f(4940, arrayOf<Any>(n))
+  val gpui_mgmt_plan_view_canvas: String get() = Tr.s(4941)
+  val gpui_mgmt_plan_view_split: String get() = Tr.s(4942)
+  val gpui_mgmt_plan_view_list: String get() = Tr.s(4943)
+  val gpui_mgmt_plan_grid_all: String get() = Tr.s(4944)
+  val gpui_mgmt_plan_grid_pair: String get() = Tr.s(4945)
+  val gpui_mgmt_plan_grid_single: String get() = Tr.s(4946)
+  val gpui_mgmt_plan_expand: String get() = Tr.s(4947)
+  val gpui_mgmt_plan_compact: String get() = Tr.s(4948)
+  val gpui_mgmt_plan_sync: String get() = Tr.s(4949)
+  val gpui_mgmt_plan_fit: String get() = Tr.s(4950)
+  val gpui_mgmt_plan_lock: String get() = Tr.s(4951)
+  val gpui_mgmt_plan_unlock: String get() = Tr.s(4952)
+  val gpui_mgmt_plan_layer_move: String get() = Tr.s(4953)
+  val gpui_mgmt_plan_width: String get() = Tr.s(4954)
+  val gpui_mgmt_plan_addnote: String get() = Tr.s(4955)
+  val gpui_mgmt_plan_note_placeholder: String get() = Tr.s(4956)
+  val gpui_mgmt_plan_hint: String get() = Tr.s(4957)
+  val gpui_mgmt_plan_rejectlayer: String get() = Tr.s(4958)
+  val gpui_mgmt_plan_edited: String get() = Tr.s(4959)
+  val gpui_mgmt_plan_locked: String get() = Tr.s(4960)
+  val gpui_mgmt_plan_noitems: String get() = Tr.s(4961)
+  val gpui_mgmt_plan_stackup_short: String get() = Tr.s(4962)
+  val gpui_mgmt_plan_layer_short: String get() = Tr.s(4963)
+  fun gpui_mgmt_plan_awaiting_short(n: Any): String = Tr.f(4964, arrayOf<Any>(n))
+  fun gpui_mgmt_plan_done_of(done: Any, total: Any): String = Tr.f(4965, arrayOf<Any>(done, total))
+  val gpui_planmode_chip_review: String get() = Tr.s(4966)
+  val mobile_plan_steer: String get() = Tr.s(4967)
+  val mobile_plan_details: String get() = Tr.s(4968)
+  val mobile_plan_reset: String get() = Tr.s(4969)
+  val mobile_plan_removepoint: String get() = Tr.s(4970)
+  val mobile_plan_touchhint: String get() = Tr.s(4971)
+  val mobile_plan_copied: String get() = Tr.s(4972)
+  fun mobile_plan_widthmm(v: Any): String = Tr.f(4973, arrayOf<Any>(v))
+  fun mobile_plan_coord(x: Any, y: Any): String = Tr.f(4974, arrayOf<Any>(x, y))
+  val provider_notice_head: String get() = Tr.s(4975)
+  val provider_notice_text_none: String get() = Tr.s(4976)
+  val provider_notice_text_signedout: String get() = Tr.s(4977)
+  val provider_notice_button: String get() = Tr.s(4978)
+  val provider_notice_senderr: String get() = Tr.s(4979)
+  fun provider_notice_senderr_remote(machine: Any): String = Tr.f(4980, arrayOf<Any>(machine))
+  val web_settings_providers: String get() = Tr.s(4981)
+  val web_settings_providers_browser: String get() = Tr.s(4982)
+  fun order_lead_days(days: Number): String = Tr.f(4983, arrayOf<Any>(days))
+  fun order_estimate_warnings(warnings: Any): String = Tr.f(4984, arrayOf<Any>(warnings))
+  val web_home_open: String get() = Tr.s(4985)
+  val web_home_fold: String get() = Tr.s(4986)
+  val web_home_unfold: String get() = Tr.s(4987)
+  val web_home_loading: String get() = Tr.s(4988)
+  val web_home_error: String get() = Tr.s(4989)
+  fun web_home_lead(n: Any): String = Tr.f(4990, arrayOf<Any>(n))
+  val web_home_lead_one: String get() = Tr.s(4991)
+  val web_ring_unavailable: String get() = Tr.s(4992)
+  val web_ring_loading: String get() = Tr.s(4993)
+  val web_ring_error: String get() = Tr.s(4994)
+  fun web_ring_count(n: Any): String = Tr.f(4995, arrayOf<Any>(n))
+  val web_ring_count_one: String get() = Tr.s(4996)
+  fun web_ring_found(found: Any, total: Any, q: Any): String = Tr.f(4997, arrayOf<Any>(found, total, q))
+  val web_ring_not_heard: String get() = Tr.s(4998)
+  val web_ring_app_words: String get() = Tr.s(4999)
+  fun web_ring_heard_by(model: Any): String = Tr.f(5000, arrayOf<Any>(model))
+  fun web_ring_heard_by_sure(model: Any, conf: Any): String = Tr.f(5001, arrayOf<Any>(model, conf))
+  val web_ring_state_sent: String get() = Tr.s(5002)
+  val web_ring_state_new: String get() = Tr.s(5003)
+  val web_ring_state_heard: String get() = Tr.s(5004)
+  val web_ring_state_failed: String get() = Tr.s(5005)
+  val web_ring_state_busy: String get() = Tr.s(5006)
+  val web_ring_no_words: String get() = Tr.s(5007)
+  val gpui_c_solidcraft_needs_hub: String get() = Tr.s(5008)
+  val gpui_c_solidcraft_local_only: String get() = Tr.s(5009)
+  val gpui_c_solidcraft_opening: String get() = Tr.s(5010)
+  val gpui_c_solidcraft_waiting: String get() = Tr.s(5011)
+  val gpui_c_solidcraft_starting: String get() = Tr.s(5012)
+  val gpui_c_solidcraft_not_responding: String get() = Tr.s(5013)
+  val gpui_c_solidcraft_could_not_start: String get() = Tr.s(5014)
+  val gpui_c_solidcraft_could_not_start_prefix: String get() = Tr.s(5015)
+  val gpui_c_solidcraft_no_embed: String get() = Tr.s(5016)
+  val gpui_c_solidcraft_no_container: String get() = Tr.s(5017)
+  val gpui_c_solidcraft_own_window: String get() = Tr.s(5018)
+  val gpui_c_solidcraft_not_installed: String get() = Tr.s(5019)
+  fun gpui_c_solidcraft_install_desc(version: Any, mb: Any): String = Tr.f(5020, arrayOf<Any>(version, mb))
+  val gpui_c_solidcraft_install_desc_nosize: String get() = Tr.s(5021)
+  val gpui_c_solidcraft_install_btn: String get() = Tr.s(5022)
+  val gpui_c_solidcraft_installing: String get() = Tr.s(5023)
+  val gpui_c_solidcraft_downloading: String get() = Tr.s(5024)
+  val gpui_c_solidcraft_closed: String get() = Tr.s(5025)
+  val gpui_c_solidcraft_open_btn: String get() = Tr.s(5026)
+  val gpui_c_solidcraft_window_err: String get() = Tr.s(5027)
+  val gpui_c_solidcraft_install_failed: String get() = Tr.s(5028)
+  val gpui_c_solidcraft_open: String get() = Tr.s(5029)
+  val gpui_c_solidcraft_new_part: String get() = Tr.s(5030)
+  val gpui_c_solidcraft_new_short: String get() = Tr.s(5031)
+  val gpui_c_solidcraft_popout_cmd: String get() = Tr.s(5032)
+  val gpui_f2_solidcraft_looking: String get() = Tr.s(5033)
+  fun gpui_f2_solidcraft_ok(v: Any, path: Any): String = Tr.f(5034, arrayOf<Any>(v, path))
+  fun gpui_f2_solidcraft_notfound(v: Any, n: Any, from: Any): String = Tr.f(5035, arrayOf<Any>(v, n, from))
+  fun gpui_f2_solidcraft_installing(v: Any, step: Any): String = Tr.f(5036, arrayOf<Any>(v, step))
+  fun gpui_f2_solidcraft_failed(why: Any): String = Tr.f(5037, arrayOf<Any>(why))
+  val gpui_f2_solidcraft_nopkg: String get() = Tr.s(5038)
+  fun gpui_f2_solidcraft_cli(v: Any, cli: Any): String = Tr.f(5039, arrayOf<Any>(v, cli))
+  fun gpui_f2_solidcraft_cli_nowin(v: Any, cli: Any): String = Tr.f(5040, arrayOf<Any>(v, cli))
+  val gpui_c_solidcraft_settings_ask: String get() = Tr.s(5041)
+  fun gpui_c_solidcraft_settings_installing(v: Any): String = Tr.f(5042, arrayOf<Any>(v))
+  val gpui_c_solidcraft_settings_folder_hint: String get() = Tr.s(5043)
+  val gpui_c_solidcraft_settings_notfound_dir: String get() = Tr.s(5044)
+  val gpui_c_solidcraft_settings_notfound: String get() = Tr.s(5045)
+  val gpui_c_solidcraft_settings_nopkg: String get() = Tr.s(5046)
+  fun gpui_c_solidcraft_settings_confirm(v: Any, n: Any, from: Any, folder: Any): String = Tr.f(5047, arrayOf<Any>(v, n, from, folder))
+  fun gpui_c_solidcraft_settings_offer(v: Any, from: Any): String = Tr.f(5048, arrayOf<Any>(v, from))
+  fun gpui_c_solidcraft_settings_downloading(done: Any, total: Any): String = Tr.f(5049, arrayOf<Any>(done, total))
+  val gpui_c_solidcraft_bring_back_cmd: String get() = Tr.s(5050)
+  val gpui_c_solidcraft_cli_only: String get() = Tr.s(5051)
+  val gpui_c_solidcraft_mech_hint: String get() = Tr.s(5052)
+  val solidcraft_web_open: String get() = Tr.s(5053)
+  val solidcraft_web_preview: String get() = Tr.s(5054)
+  val solidcraft_web_save: String get() = Tr.s(5055)
+  val solidcraft_web_saving: String get() = Tr.s(5056)
+  fun solidcraft_web_saved(name: Any): String = Tr.f(5057, arrayOf<Any>(name))
+  val solidcraft_web_install_btn: String get() = Tr.s(5058)
+  fun solidcraft_web_install_prompt(n: Any): String = Tr.f(5059, arrayOf<Any>(n))
+  fun solidcraft_web_installing(step: Any): String = Tr.f(5060, arrayOf<Any>(step))
+  val solidcraft_web_loading: String get() = Tr.s(5061)
+  fun solidcraft_web_stage_fetch(name: Any): String = Tr.f(5062, arrayOf<Any>(name))
+  val solidcraft_web_stage_engine: String get() = Tr.s(5063)
+  fun solidcraft_web_stage_wasm(pct: Any): String = Tr.f(5064, arrayOf<Any>(pct))
+  val solidcraft_web_stage_init: String get() = Tr.s(5065)
+  fun solidcraft_web_stage_open(name: Any): String = Tr.f(5066, arrayOf<Any>(name))
+  val solidcraft_web_copied: String get() = Tr.s(5067)
+  val solidcraft_web_not_installed: String get() = Tr.s(5068)
+  val solidcraft_web_readonly: String get() = Tr.s(5069)
+  val gpui_c_solidcraft_full_tip: String get() = Tr.s(5070)
+  val gpui_c_solidcraft_exit_full_tip: String get() = Tr.s(5071)
+  val gpui_c_solidcraft_full_cmd: String get() = Tr.s(5072)
+  val gpui_c_solidcraft_exit_full_cmd: String get() = Tr.s(5073)
+  val gpui_c_mech_view_native: String get() = Tr.s(5074)
+  val gpui_c_mech_view_native_tip: String get() = Tr.s(5075)
+  val gpui_c_mech_view_solidcraft_tip: String get() = Tr.s(5076)
+  val gpui_c_solidcraft_view_native: String get() = Tr.s(5077)
+  val gpui_c_solidcraft_native_always: String get() = Tr.s(5078)
+  val settings_cad_mech_tab: String get() = Tr.s(5079)
+  val settings_cad_mech_tab_note: String get() = Tr.s(5080)
+  val settings_cad_mech_solidcraft: String get() = Tr.s(5081)
+  val settings_cad_mech_backplane: String get() = Tr.s(5082)
+  val common_cut: String get() = Tr.s(5083)
+  val menu_copy_message: String get() = Tr.s(5084)
 }
