@@ -599,9 +599,10 @@ impl RpcHandler for Rpc {
             let r = match method {
                 // a home move (net/homemove.rs) holds a message to a thread it carries, and sends one to the old copy of a moved thread on to the new home
                 "turn.start" => match crate::net::homemove::intercept(&self.0.hub, th, p).await { Some(r) => r, None => self.0.turn_start(who, th, p).await },
-                _ => { let r = self.0.interrupt(th).await; if let Some(m) = self.0.mailroom() { m.stopping(th).await }
-                    // the person's own Stop: they are looking at the stop they chose, so it is no "Needs you" (state/visible.rs `looked`)
-                    if r.is_ok() { self.0.commit_events(vec![rules::stop_seen(th, now_s())]).await } r }
+                _ => { let was = self.0.world().await.running(th); let r = self.0.interrupt(th).await; if let Some(m) = self.0.mailroom() { m.stopping(th).await }
+                    // the person's own Stop: they are looking at the stop they chose, so it is no "Needs you" (state/visible.rs `looked`); a Stop of
+                    // a thread that is not running writes nothing (law interrupt_idle_nothing)
+                    if r.is_ok() && was { self.0.commit_events(vec![rules::stop_seen(th, now_s())]).await } r }
             };
             match r {
                 Ok(()) => vec![ok(id)],
