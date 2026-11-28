@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
@@ -62,7 +63,8 @@ fun CopyButton(text: String, modifier: Modifier = Modifier, word: Boolean = fals
         .clickable(onClickLabel = Msg.common_copy) { copyToClipboard(ctx, text); copied = true }
         .padding(horizontal = 4.dp, vertical = 3.dp).testTag(tag), verticalAlignment = Alignment.CenterVertically) {
         Icon(if (copied) Icons.Default.Check else Icons.Default.ContentCopy, null, tint = c, modifier = Modifier.size(size.dp))
-        if (word) { Spacer(Modifier.width(4.dp)); Text(label, color = c, fontFamily = BpMono, fontSize = 11.sp, maxLines = 1) }
+        // the word is the button's own label (merged above): no second node saying it again (the sizes walk reads that as two overlapping "Copy"s)
+        if (word) { Spacer(Modifier.width(4.dp)); Text(label, Modifier.clearAndSetSemantics {}, color = c, fontFamily = BpMono, fontSize = 11.sp, maxLines = 1) }
     }
 }
 
