@@ -1472,6 +1472,8 @@ impl Backplane {
             let selected = self.timeline_selected();
             let mut items = super::ctxmenu::selection_items(&selected);
             if selected.is_empty() && rows_only && self.screens.reg.borrow().inside(e.position, true) { items = super::ctxmenu::message_items(&self.message_text_at(pos)); }
+            // Settings and Setup text: Copy only (a Quote would go into the message box behind the dialog)
+            if self.screens.reg.borrow().blocks.get(pos.block).is_some_and(|b| b.id.starts_with(SET_ID)) { items.retain(|i| i.action != super::ctxmenu::LOCAL_QUOTE); }
             if let Some(l) = link { let dl = self.link_download(pos.block, &l); items.extend(super::ctxmenu::link_items(&l.href, l.file, dl)); }
             if !items.is_empty() { self.ctx_open(e.position, items, cx); }
             return;
