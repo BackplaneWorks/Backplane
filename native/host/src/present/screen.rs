@@ -945,6 +945,7 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
     let shown=json!({"projects":projects,"sidebarPages":pages,"nativeSidebar":1,"active":[],"legacy":[],"thread":shown_thread,"rooms":rooms(st,far,un,hub),"bots":bots(st,far,un,hub,opts.now),"theme":setting(st,"ui.theme"),"mouse":json!({"2d":setting(st,"mouse.2d"),"3d":setting(st,"mouse.3d"),"invert":setting(st,"mouse.invert")}),"browserStart":crate::settings::browser_start::url(setting(st,crate::settings::browser_start::KEY)),
         "renaming":renaming,"deleting":deleting,"bot":null,"settings":if super::settings::is_open(&session) { super::settings::view(st,&session,p.get("hubInfo").unwrap_or(&Value::Null)) }else{Value::Null},"newRoom":super::botforms::new_room(st,hub,&session).unwrap_or(Value::Null),"newBot":super::botforms::new_bot(&session).unwrap_or(Value::Null),"projectHome":null});
     let mut shown=shown;
+    shown["settingsPages"]=super::settings::palette_pages(); // Ctrl+K finds a Settings page by its name or another one while Settings is shut
     let no_provider=crate::settings::provider_notice::from_screen(p.get("hubInfo").and_then(|h|h["models"].as_str()), p.get("hubInfo").and_then(|h|h["modelsProbedHere"].as_bool()), setting(st,"accounts.inventory"));
     if !no_provider.is_null() { shown["noProvider"]=no_provider; }
     if !far.is_empty() { shown["machines"]=machine_switch(far,un,&mpick); }
@@ -1057,8 +1058,8 @@ mod tests {
         for path in ["/shown/projects","/overlay/j/projects"] { for pr in actual.pointer_mut(path).and_then(|v| v.as_array_mut()).into_iter().flatten() { if let Some(o)=pr.as_object_mut() { o.remove("color"); o.remove("css"); o.remove("closed"); o.remove("swarms"); /* a project's swarms (docs/SWARM.md), which 0.14 had none of */
             // and a red row's want word (sidebar::want), drawn where its age goes
             for k in ["threads","settled","snoozed","archived"] { for r in o.get_mut(k).and_then(|v| v.as_array_mut()).into_iter().flatten() { if let Some(r)=r.as_object_mut() { r.remove("want"); } } } } } }
-        // approved additions: the sidebar's sections, Ctrl+K's list, the groups a project moves to, a project's page (present/sections.rs), the Browser's start page (settings/browser_start.rs), which 0.14 has none of
-        for path in ["/shown","/overlay/j"] { if let Some(o)=actual.pointer_mut(path).and_then(|v|v.as_object_mut()) { for k in ["sections","jump","groupsTo","projectPage","mouse","browserStart"] { o.remove(k); } } }
+        // approved additions: the sidebar's sections, Ctrl+K's list, the groups a project moves to, a project's page (present/sections.rs), the Browser's start page (settings/browser_start.rs), the Settings pages for Ctrl+K (present/settings.rs `palette_pages`), which 0.14 has none of
+        for path in ["/shown","/overlay/j"] { if let Some(o)=actual.pointer_mut(path).and_then(|v|v.as_object_mut()) { for k in ["sections","jump","groupsTo","projectPage","mouse","browserStart","settingsPages"] { o.remove(k); } } }
         let mut shown=expected["shown"].clone(); retain_root(&mut shown,OMITTED);
         assert_eq!(actual["shown"],shown,"retained GPUI shown fields differ (no value normalisations)");
         let mut overlay=expected["overlay"].clone(); retain_root(&mut overlay["j"],OVERLAY_OMITTED);
