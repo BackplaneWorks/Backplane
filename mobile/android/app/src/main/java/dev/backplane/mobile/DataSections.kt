@@ -714,10 +714,11 @@ fun ProjectPageScreen(p: DSecRow, open: (String) -> Unit, newThread: (String) ->
             var asking by remember(pr.id) { mutableStateOf(false) }
             val scope = rememberCoroutineScope()
             LaunchedEffect(pr.id, DataClient.conn) { if (DataClient.conn == DataClient.Conn.ONLINE) runCatching { DataClient.buyOfProject(pr.id) }.onSuccess { buy = it } }
+            // both 48 dp tall at least: 14 sp text and its padding alone make 45 dp
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                DText("+ " + Msg.android_thread_new_in(pr.title), dcs.primary, 14, Modifier.weight(1f).clickable { newThread(pr.id) }.padding(horizontal = 12.dp, vertical = 12.dp).testTag("project.page.new"), lines = 1)
+                Box(Modifier.weight(1f).heightIn(min = 48.dp).clickable { newThread(pr.id) }.testTag("project.page.new"), contentAlignment = Alignment.CenterStart) { DText("+ " + Msg.android_thread_new_in(pr.title), dcs.primary, 14, Modifier.padding(horizontal = 12.dp, vertical = 12.dp), lines = 1) }
                 buy?.let { b ->
-                    DText(Tr.t(b.label), dcs.primary, 14, Modifier.clickable(enabled = !buying) { asking = true }.padding(horizontal = 12.dp, vertical = 12.dp).testTag("project.page.buy"), bold = true, lines = 1)
+                    Box(Modifier.heightIn(min = 48.dp).clickable(enabled = !buying) { asking = true }.testTag("project.page.buy"), contentAlignment = Alignment.Center) { DText(Tr.t(b.label), dcs.primary, 14, Modifier.padding(horizontal = 12.dp, vertical = 12.dp), bold = true, lines = 1) }
                     if (asking) AlertDialog(onDismissRequest = { asking = false }, shape = dShapeDialog,
                         title = { Text(Msg.android_buy_ask(pr.title), fontFamily = BpUi, fontSize = 16.sp, fontWeight = FontWeight.SemiBold) },
                         text = if (b.tip.isEmpty()) null else { { Text(Tr.t(b.tip), fontFamily = BpUi, fontSize = 14.sp) } },
