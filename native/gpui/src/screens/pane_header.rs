@@ -198,7 +198,8 @@ impl Press {
                 cx.notify();
             }
             Self::SolidCraftFull => this.solidcraft_toggle_full(cx),
-            Self::MechView(native) => { super::viewer::set_mech_native(this, *native); cx.notify(); }
+            // back to SolidCraft: its pane is made now, not on the hub's next change (which may never come: the hub's state did not change)
+            Self::MechView(native) => { super::viewer::set_mech_native(this, *native); if !*native { this.solidcraft_sync(cx); } cx.notify(); }
         }
     }
 }

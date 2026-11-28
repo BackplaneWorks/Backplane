@@ -1097,13 +1097,13 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
             "mech" => {
                 let h = header(cx);
                 let mut tools = Vec::new();
-                if solidcraft.is_some_and(|sc| !sc.read(cx).popped) {
+                if solidcraft.is_some_and(|sc| !sc.read(cx).popped && sc.read(cx).has_window()) {
                     tools.push(solidcraft_full_tool(cx, SOLIDCRAFT_FULL.load(std::sync::atomic::Ordering::Relaxed)));
                 }
                 let body = match solidcraft {
                     Some(sc) if sc.read(cx).popped => crate::viewers::solidcraft_pane::popped_placeholder(cx, light),
                     Some(sc) => div().flex_1().min_h_0().child(sc.clone()).into_any_element(),
-                    None => model_loading(&mut pv.loading, &lk, &super::panestate::loading_for(k, false)),
+                    None => model_loading(&mut pv.loading, &lk, &super::panestate::loading_for_mech(mech_native(thread))),
                 };
                 div().size_full().flex().flex_col().child(mech_header(cx, light, viewer, pv, h, tools)).child(body).into_any_element()
             },
@@ -1123,7 +1123,8 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
         else if open == "mech" && !mech_native(thread) {
             let h = header(cx);
             let mut tools = vec![mech_view_tool(cx, false)];
-            if let Some(sc) = solidcraft {
+            // SolidCraft's window buttons only with its window (none on the not-installed or could-not-start screens)
+            if let Some(sc) = solidcraft.filter(|sc| sc.read(cx).has_window()) {
                 let popped = sc.read(cx).popped;
                 if !popped {
                     tools.push(solidcraft_full_tool(cx, SOLIDCRAFT_FULL.load(std::sync::atomic::Ordering::Relaxed)));
@@ -1190,7 +1191,7 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
                 } else {
                     super::panestate::view(light, &super::panestate::mech_empty(&say, &note), None)
                 }
-            } else { match solid { Some(s) if ready => div().flex_1().min_h_0().child(s.clone()).into_any_element(), _ => model_loading(&mut pv.loading, &format!("{open}:{want}"), &super::panestate::loading_for(open, false)) } };
+            } else { match solid { Some(s) if ready => div().flex_1().min_h_0().child(s.clone()).into_any_element(), _ => model_loading(&mut pv.loading, &format!("{open}:{want}"), &if open == "mech" { super::panestate::loading_for_mech(true) } else { super::panestate::loading_for(open, false) }) } };
             let h = header(cx);
             let mut tools = Vec::new();
             if let Some(page) = solid.filter(|_| ready) {

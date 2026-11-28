@@ -45,6 +45,10 @@ pub fn loading_for(open: &str, gerbers: bool) -> String {
     }
 }
 
+/// The loading text of a Mech page: SolidCraft's while it opens, the model's when Backplane's own viewer shows the part
+/// (viewer::mech_native) — a person who chose "View in Backplane" is not waiting for SolidCraft.
+pub fn loading_for_mech(native: bool) -> String { loading_for(if native { "3d" } else { "mech" }, false) }
+
 /// Whether a hub `none` reason names a missing project file (an empty state) rather than a failure.
 pub fn is_empty_none(why: &str) -> bool {
     matches!(why, "No board in this project yet" | "No schematic in this project yet" | "No 3D model yet" | "No Gerber files in this project yet" | "No board to compare these Gerbers against.") // i18n-ok: matching the hub's canonical English none strings
@@ -310,6 +314,11 @@ mod tests {
         assert_eq!((fallback.kind, fallback.retry), (Kind::Error, false));
     }
 
+    #[test] fn a_part_in_backplanes_own_viewer_loads_as_a_model_not_as_solidcraft() {
+        assert_eq!(loading_for_mech(true), loading_for("3d", false));
+        assert_eq!(loading_for_mech(false), loading_for("mech", false));
+        assert_ne!(loading_for_mech(true), loading_for_mech(false));
+    }
     #[test] fn mech_empty_has_plain_line_and_next_step() {
         let m = mech_empty("No mechanical parts in this project yet", "Ask an agent to model one, or add a STEP file to mech/.");
         assert_eq!((m.kind, m.retry), (Kind::Empty, false));
