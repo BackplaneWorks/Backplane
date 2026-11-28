@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "totalAssetGzipBytes": 252327,
+  "totalAssetGzipBytes": 252292,
   "styleTokensSha256": "a4fed1b1c7bc676acc328907343eb5dcf87e426383d05617c632e48c0c3f2b80",
   "i18nKeys": [
     "agy.signout",
@@ -370,7 +370,7 @@
     "web.settings.providers",
     "web.settings.providers.browser"
   ],
-  "i18nSubsetSha256": "edbcf89d66be77f4c4cf660ca827ffdfe55480f44cc5804c431be6f048920c97",
+  "i18nSubsetSha256": "43e82b135f62ddac05525d8ecf27015aee0c20bdc73943fe6b8fc8f80fdf85b1",
   "inputs": {
     "web/src/addproject.ts": "06a7ff3e13cd78d993ebca7f638d5d623da06c0099186ad534bae8f184dbe44f",
     "web/src/app.ts": "00be28d1e8a3f0d532fe5da3821e8aece412a4adfc35b423751e62e610d4e2cb",
@@ -439,9 +439,9 @@
   },
   "outputs": {
     "assets/app.js": {
-      "bytes": 481233,
-      "gzipBytes": 136344,
-      "sha256": "a4ed0f53647a06c988de0fec6a928de342bc957e221ac6699f6d1a0642fd3de6"
+      "bytes": 481196,
+      "gzipBytes": 136326,
+      "sha256": "56fe20e8c5f6b6b6c6b940847419a34f67ce19256379d7db157e0d25113fa23c"
     },
     "assets/favicon-light.svg": {
       "bytes": 1207,
@@ -459,9 +459,9 @@
       "sha256": "123b6a27f255d339b505c8fd83609674f0bddf9b46c0e907fce23befa96b1eec"
     },
     "assets/pair.js": {
-      "bytes": 66213,
-      "gzipBytes": 19594,
-      "sha256": "1a315ccbc783876f880e81a4e64d9de813697fe71598558889af72f0da073bf7"
+      "bytes": 66176,
+      "gzipBytes": 19577,
+      "sha256": "9dc3d7313ee4c24ffacc01bca6a4e174b520503b0510c09a1edbf531efe0d2a4"
     },
     "assets/style.css": {
       "bytes": 110085,
