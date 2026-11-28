@@ -12,6 +12,17 @@ pub(crate) struct RailRow<'a> {
     pub state: &'a str, why: &'a str, present: bool,
 }
 
+/// The address of the link under the pointer, at the bottom left of a list of messages (the thread, a room, a swarm): on one line, as wide as it
+/// needs up to the list's width `w` (as last laid out; 0 when unknown), then shortened in its middle so both its site and its end show. It spans
+/// the list's width itself (left and right set): an absolute box with only a left edge took the width of the list's left gutter and cut the address there.
+pub fn link_address(light: bool, text: &str, w: Pixels) -> Div {
+    let c = |n: &str| theme::color(light, n);
+    let shown = if w > px(0.) { crate::screens::mgmt_bom::mid_ellipsis(text, link_chars(f32::from(w))) } else { text.to_string() };
+    div().absolute().left_0().right_0().bottom_0().flex().child(div().max_w_full().px_2().py_px().bg(c("raise")).border_t_1().border_r_1().border_color(c("line"))
+        .text_size(crate::scale::tpx(11.)).text_color(c("dim")).overflow_hidden().whitespace_nowrap().text_ellipsis().child(shown))
+}
+/// How many characters of an address fit in a list `w` px wide: its padding off, at about 0.62 em a character of the 11 px text at the size in force.
+pub fn link_chars(w: f32) -> usize { ((w - 24.) / (11. * 0.62 * crate::scale::s())).floor().max(8.) as usize }
 pub(crate) fn rail_rows(viewer: &Value, simulation: bool) -> Vec<RailRow<'_>> {
     if let Some(rows) = viewer["rail"].as_array() {
         return rows.iter().filter(|r| simulation || r["id"] != "simulation").map(|row| {
@@ -872,7 +883,7 @@ impl Backplane {
             .on_scroll_wheel(cx.listener(|this, e: &ScrollWheelEvent, _, _| this.scroll_note(e)))
             .on_mouse_move(cx.listener(|this, e, _, cx| this.timeline_move(e, cx))).on_mouse_up(MouseButton::Left, cx.listener(|this, e, w, cx| this.timeline_up(e, w, cx))).on_mouse_up_out(MouseButton::Left, cx.listener(|this, e, w, cx| this.timeline_up(e, w, cx)))
             .children(if has_thread && self.selected.rsplit('|').next() == Some(self.screens.find.thread.as_str()) { crate::screens::find::bar(cx, light, &self.screens.find) } else { None })
-            .when(!self.screens.reg.borrow().hover.is_empty(), |d| { let t = self.screens.reg.borrow().hover.clone(); d.child(div().absolute().left_0().bottom_0().max_w_full().px_2().py_px().bg(c("raise")).border_t_1().border_r_1().border_color(c("line")).text_size(crate::scale::tpx(11.)).text_color(c("dim")).overflow_hidden().whitespace_nowrap().child(t)) })
+            .when(!self.screens.reg.borrow().hover.is_empty(), |d| { let t = self.screens.reg.borrow().hover.clone(); d.child(link_address(light, &t, self.timeline.viewport_bounds().size.width)) })
             .when(no_rows, |d| d.child(div().flex_1().flex().justify_center().items_end().child(div().w_full().max_w(px(930.)).px_4().py_6().text_color(c("dim")).child(if has_thread && thread["loading"] == true { trs("Loading…") } else if has_thread { trs("Start a conversation.") } else { trs("Pick a thread, or start one with + next to a project.") }))))
             .when(!no_rows, |d| d.child(list(self.timeline.clone(), cx.processor(|this, ix, _, cx| this.timeline_row(ix, cx))).flex_1().min_h_0()))
             .children(thread["live"].as_array().into_iter().flatten().map(|live| div().w_full().flex().justify_center().child(div().w_full().max_w(px(930.)).px_4().py_2().child(trs(&string(live, "text"))))))

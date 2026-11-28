@@ -476,7 +476,7 @@ impl Backplane {
                         }))))
             })
             .when(!hover_text.is_empty(), |d| {
-                d.child(div().absolute().left_0().bottom_0().max_w_full().px_2().py_px().bg(c("raise")).border_t_1().border_r_1().border_color(c("line")).text_size(crate::scale::tpx(11.)).text_color(c("dim")).overflow_hidden().whitespace_nowrap().child(hover_text))
+                d.child(crate::ui::link_address(light, &hover_text, self.screens.swarm_list.viewport_bounds().size.width))
             });
 
         if !self.screens.img_poll && self.screens.images.loading() {

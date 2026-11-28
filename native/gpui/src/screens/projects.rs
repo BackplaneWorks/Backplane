@@ -291,6 +291,14 @@ pub fn auto_open(f: &Folders, done: &mut String) -> Option<String> {
 }
 pub fn close_cmd() -> Command { Command::Action("proj-close".into(), String::new()) }
 /// Esc leaves the folder picker while it is open.
+/// Esc with the keyboard in the sidebar's Search: that field's alone (its words go, then the keyboard goes back to the message box); a form
+/// open beside it (New bot) stays. True when it was the Search's.
+pub fn search_escape(this: &mut Backplane, window: &mut Window, cx: &mut Context<Backplane>) -> bool {
+    let Some(s) = this.screens.projects.search.clone() else { return false };
+    if !s.focus_handle(cx).is_focused(window) { return false }
+    if s.read(cx).content.is_empty() { this.want_focus = true; } else { s.update(cx, |c, cx| c.set(String::new(), cx)); }
+    cx.notify(); true
+}
 pub fn close_on_escape(data: &Value) -> Option<Command> { data["folders"].is_object().then(close_cmd) }
 /// Whether the hub's text replaces what is in the box: only a real change that is not one of the last texts this box sent.
 pub fn adopt(hub: &str, typed: &str, sent: &[String]) -> bool { hub != typed && !sent.iter().any(|s| s == hub) }
