@@ -8,6 +8,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Icon
@@ -139,16 +141,32 @@ internal fun PageRows(title: String, tag: String, rows: List<org.json.JSONObject
     // the row last pressed: a refusal is drawn under it, where the person is looking, not at the top of a long page
     var pressed by remember { mutableStateOf("") }
     val atRow = error.isNotEmpty() && rows.any { it.optString("label") == pressed }
+    // rows the hub marks `adv` fold under one Advanced row, closed at first; a refusal under one of them opens it
+    val (plain, adv) = SettingsNav.split(rows, SettingsNav.debugAdv)
+    var advOpen by androidx.compose.runtime.saveable.rememberSaveable(tag) { mutableStateOf(false) }
+    LaunchedEffect(atRow, pressed) { if (atRow && adv.any { it.optString("label") == pressed }) advOpen = true }
     Column(Modifier.fillMaxWidth().testTag("settings.$tag"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        DMono(title, dfaint)
+        SettingsSection(tag, title)
         if (error.isNotEmpty() && !atRow) DMono(Tr.t(error), dcs.error, 12)
-        rows.forEach { r ->
+        @Composable fun row(r: JSONObject) {
             val label = r.optString("label")
             PlainRow(r, tag, { name, hub -> typed[name] ?: hub }, { name, v -> typed[name] = v }, error = if (atRow && label == pressed) error else "") { b ->
                 val action = b.optString("action"); val value = b.optString("value"); val sent = typed.toMap(); pressed = label
                 if (!pageLocal(ctx, action, value)) scope.launch { act(action, value, sent)?.let { typed.remove(it) } }
             }
             DLine()
+        }
+        plain.forEach { row(it) }
+        if (adv.isNotEmpty()) {
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable { advOpen = !advOpen }.testTag("settings.$tag.adv"), verticalAlignment = Alignment.CenterVertically) {
+                Icon(if (advOpen) Icons.Default.ExpandMore else Icons.Default.ChevronRight, if (advOpen) Msg.common_hide else Msg.common_show, tint = dcs.onSurfaceVariant, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                DText(Msg.mobile_settings_advanced, dcs.onSurfaceVariant, 14, lines = 1)
+                Spacer(Modifier.width(6.dp))
+                DMono("${adv.size}", dfaint, 12)
+            }
+            DLine()
+            if (advOpen) adv.forEach { row(it) }
         }
     }
 }
