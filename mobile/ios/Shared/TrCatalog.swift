@@ -422,6 +422,8 @@ gpui.swarm.topic	Topic	トピック	Tema
 gpui.swarm.goal	Goal, in a line	目標（1行で）	Objetivo, en una línea
 gpui.swarm.seed	First message to every member	全メンバーへの最初のメッセージ	Primer mensaje para cada miembro
 gpui.swarm.role	Role (optional)	役割（任意）	Rol (opcional)
+gpui.swarm.needs.topic	Needs a topic	トピックが必要です	Falta un tema
+gpui.swarm.needs.members	Needs two to eight members	メンバーは2〜8人必要です	Faltan de dos a ocho miembros
 gpui.swarm.remove	Remove from the swarm	スウォームから外す	Quitar del enjambre
 gpui.swarm.over	This swarm is over.	このスウォームは終了しました。	Este enjambre ha terminado.
 gpui.swarm.none	No posts yet.	まだ投稿はありません。	Sin publicaciones aún.
@@ -2223,6 +2225,9 @@ gpui.acct.in.minutes	in {m}m	{m}分後	en {m}m
 gpui.acct.left	{window}  {pct}% left	{window}  残り{pct}%	{window}  {pct}% restante
 gpui.acct.resets.now	\s· resets now	\s· まもなくリセット	\s· se reinicia ahora
 gpui.acct.resets	\s· resets {when}	\s· {when}にリセット	\s· se reinicia {when}
+gpui.acct.not.set.up	Not set up	未設定	Sin configurar
+gpui.acct.not.set.up.note	Not set up.	未設定です。	Sin configurar.
+gpui.acct.usage.not.read	usage not read	使用量を読めていません	uso no leído
 gpui.bots.webhook.name	Webhook name	Webhookの名前	Nombre del webhook
 gpui.bots.eg	{label} (e.g. {e})	{label}（例：{e}）	{label} (p. ej. {e})
 gpui.bots.no.tasks.yet.teach.this	No tasks yet. Tasks this bot learns in its Browser tab are listed here.	タスクはまだありません。このボットがブラウザタブで覚えたタスクがここに表示されます。	Sin tareas aún. Las tareas que este bot aprende en su pestaña Navegador aparecen aquí.

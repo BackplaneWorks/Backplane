@@ -73,6 +73,10 @@ pub fn bot_rows(v: &Value) -> Vec<BotRow> {
 }
 /// The OAuth client's line, only when it is not ready.
 pub fn client_line(v: &Value) -> Option<String> { (v["client"]["ready"] != true).then(|| string(&v["client"], "line")).filter(|l| !l.is_empty()) }
+/// The notice over the section: the hub's refusal of Add when it is the client line already said below is not said twice (the hub's note stands instead).
+pub fn notice_shown(notice: &str, v: &Value) -> String { if client_line(v).as_deref() == Some(notice) { string(v, "note") } else { notice.to_string() } }
+/// Whether Add can work now (the OAuth client is ready): it is the accented button only then.
+pub fn can_add(v: &Value) -> bool { v["client"]["ready"] == true }
 /// The Add button's words; empty hides it.
 pub fn add_label(v: &Value) -> Option<String> { Some(string(v, "add")).filter(|l| !l.is_empty()) }
 pub fn busy(v: &Value) -> bool { v["signin"]["busy"] == true }
@@ -184,7 +188,8 @@ pub fn section(cx: &mut Context<Backplane>, light: bool, g: &Google) -> Vec<AnyE
     let v = &g.view;
     if !v.is_object() { return vec![] }
     let mut out: Vec<AnyElement> = vec![div().pt_3().pb_2().text_size(crate::scale::tpx(14.)).font_weight(FontWeight::BOLD).child("Google" /* i18n-ok: the product name */).into_any_element()];
-    if !g.notice.is_empty() { out.push(div().mb_3().p_3().bg(c("raise")).text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(crate::i18n::trs(&g.notice)).into_any_element()); }
+    let notice = notice_shown(&g.notice, v);
+    if !notice.is_empty() { out.push(div().mb_3().p_3().bg(c("raise")).text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(crate::i18n::trs(&notice)).into_any_element()); }
     for (i, a) in account_rows(v).into_iter().enumerate() {
         let (id, armed) = (a.id.clone(), g.armed == a.id);
         let head = div().flex().items_center().gap_3()
@@ -229,7 +234,7 @@ pub fn section(cx: &mut Context<Backplane>, light: bool, g: &Google) -> Vec<AnyE
         /* i18n-ok: notices and button labels are drawn through trs; HTTP text */ col = col.child(div().flex().child(button(cx, light, "g-cancel".into(), "Cancel", false, false, |this, _| cancel(this))));
         out.push(col.into_any_element());
     }
-    if let Some(label) = add_label(v) { out.push(div().flex().child(button(cx, light, "g-add".into(), &label, true, false, |this, cx| start_signin(this, None, cx))).into_any_element()); }
+    if let Some(label) = add_label(v) { out.push(div().flex().child(button(cx, light, "g-add".into(), &label, can_add(v), false, |this, cx| start_signin(this, None, cx))).into_any_element()); }
     out
 }
 fn bi_of(v: &Value, name: &str) -> usize { v["bots"].as_array().and_then(|a| a.iter().position(|b| { let n = string(b, "name"); (if n.is_empty() { string(b, "id") } else { n }) == name })).unwrap_or(0) }

@@ -539,9 +539,11 @@ fn send_field(this: &mut Backplane, f: &Field, cx: &mut Context<Backplane>) {
     }).detach();
 }
 
+/// A nav entry's element id: one per entry (`keys` = API keys, `@keys` = Keyboard).
+fn nav_el_id(id: &str) -> String { format!("set-nav-{id}") }
 /// Send every field's pending (coalesced) text now: called before any button action, so a fast press never overtakes the last keystrokes.
 /// A hub page of the nav, chosen (a click, or the e2e `click` on `set-nav:<page>`): what is typed goes first, then the hub is asked for the page.
-pub fn go_page(this: &mut Backplane, p: &str) { flush_fields(this); let ui = &mut this.screens.settings_ui; ui.refused = None; ui.keys = false; ui.hubs = false; ui.accounts = false; ui.page = p.to_string(); ui.landed = true; ui.lit = None; end_recording(ui); to_top(ui); let _ = this.tx.try_send(Command::Action("settings-page".into(), p.to_string()));
+pub fn go_page(this: &mut Backplane, p: &str) { flush_fields(this); this.screens.focus_settings = true; let ui = &mut this.screens.settings_ui; ui.refused = None; ui.keys = false; ui.hubs = false; ui.accounts = false; ui.page = p.to_string(); ui.landed = true; ui.lit = None; end_recording(ui); to_top(ui); let _ = this.tx.try_send(Command::Action("settings-page".into(), p.to_string()));
     // Usage opens with each account's limit bars over the totals: the hub's accounts read again (and each signed-in account's usage, at most every 5 minutes)
     if p == "usage" { super::accounts::list(this); super::accounts::refresh_usage(this); } }
 /// Where the gear opens Settings: the page it was on when it shut (`left`, this run of the app), else Appearance; as (hub page, Keyboard,
@@ -555,7 +557,7 @@ pub fn reopen(left: &str) -> (String, bool, bool, bool) {
 pub fn open_nav(this: &mut Backplane, id: &str, cx: &mut Context<Backplane>) {
     let id = if id == "@device" { "appearance" } else { id };
     if !id.starts_with('@') { go_page(this, id); cx.notify(); return }
-    flush_fields(this);
+    flush_fields(this); this.screens.focus_settings = true;
     let ui = &mut this.screens.settings_ui; ui.refused = None; ui.keys = id == "@keys"; ui.hubs = id == "@hubs"; ui.accounts = id == "@accounts"; ui.landed = true; ui.lit = None; end_recording(ui); to_top(ui);
     if id == "@accounts" { super::accounts::open_page(this, cx); }
     cx.notify();
@@ -967,7 +969,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
     // the rarely needed rows (`adv`) after a fold line, in their order; ids by index over both, so no two rows share one
     let (main, folded): (Vec<usize>, Vec<usize>) = (0..list.len()).partition(|&i| !is_adv(&list[i]));
     let hubs_rows = super::hubpick::rows_on(hub_list, on_home);
-    let mut els: Vec<AnyElement> = if on_hubs { hubs_rows.iter().enumerate().map(|(i, r)| row_el(cx, light, fields, r, i, fit.rows)).collect() } else if on_acct { super::accounts::page(cx, light, acct, fit.rows) } else { main.iter().enumerate().map(|(k, &i)| { let e = row_el(cx, light, fields, &list[i], k, fit.rows); lit_el(i, e) }).collect() };
+    let mut els: Vec<AnyElement> = if on_hubs { hubs_rows.iter().enumerate().map(|(i, r)| row_el(cx, light, fields, r, i, fit.rows)).collect() } else if on_acct { super::accounts::page(cx, light, acct, fit.rows, ui.adv.contains("accounts")) } else { main.iter().enumerate().map(|(k, &i)| { let e = row_el(cx, light, fields, &list[i], k, fit.rows); lit_el(i, e) }).collect() };
     if !on_hubs && !on_acct && !folded.is_empty() {
         let open = adv_open(&list, &ui.q, ui.adv.contains(&page));
         els.push(adv_el(cx, light, &page, folded.iter().filter(|&&i| !is_heading(&list[i])).count(), open));
@@ -996,7 +998,9 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
             NavLine::Item { id, title, hits } => {
                 let on = match id.as_str() { "@keys" => on_keys, "@hubs" => on_hubs, "@accounts" => on_acct, p => !on_keys && !on_acct && !on_hubs && p == page };
                 let none = searching && hits.is_empty();
-                let el_id = match id.as_str() { "@keys" => "set-nav-keys".to_string(), "@hubs" => "set-nav-hubs".to_string(), "@accounts" => "set-nav-accounts".to_string(), p => format!("set-nav-{p}") };
+                // each entry its own element id, this app's pages keeping their `@`: the hub's API keys page is `keys`, and Keyboard as `set-nav-keys` too
+                // took its clicks (two elements of one id: the press went to Keyboard's, so the API keys row never opened)
+                let el_id = nav_el_id(id);
                 let item = div().id(SharedString::from(el_id)).relative().flex().items_start().gap_3().px_3().py(px(3.)).cursor_pointer().text_size(crate::scale::tpx(13.)).border_l_2().border_color(c(if on { "accent" } else { "bg" }));
                 let item = if on { item.bg(c("raise")) } else { item.text_color(c(if none { "faint" } else { "text" })).hover(|s| s.bg(c("panel"))) };
                 // its rectangle for the e2e drivers (BACKPLANE_GPUI_RECTS=1 only), named as its control is: `set-nav:<page>` (a GPUI_RECT line, and the
@@ -1083,12 +1087,14 @@ pub fn adv_shown(this: &Backplane) -> Option<String> {
 }
 /// The Advanced fold of a page: a line as tall as a setting row, with its hairline, the chevron the sidebar's folds use, and how many settings are
 /// under it. A press opens or shuts it; it stays where it is (the rows appear under it).
-fn adv_el(cx: &mut Context<Backplane>, light: bool, page: &str, n: usize, open: bool) -> AnyElement {
+fn adv_el(cx: &mut Context<Backplane>, light: bool, page: &str, n: usize, open: bool) -> AnyElement { fold_el(cx, light, page, &trs("Advanced"), n, open) }
+/// The same fold line under another name (Settings › Accounts' "Not set up", keyed `accounts`): its open state is `SettingsUi::adv`'s, toggled by `toggle_adv`.
+pub(super) fn fold_el(cx: &mut Context<Backplane>, light: bool, page: &str, label: &str, n: usize, open: bool) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let to = page.to_string();
     let d = div().id(SharedString::from(format!("set-adv-{page}"))).flex().items_center().py_3().border_b_1().border_color(c("line")).cursor_pointer().hover(|s| s.bg(c("panel")))
         .child(div().h(px(24.)).flex().items_center().gap_2().child(crate::art::icon(if open { "chevron-down" } else { "chevron-right" }, 14., c("dim")))
-            .child(div().text_size(crate::scale::tpx(13.)).child(trs("Advanced"))).child(div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(n.to_string())));
+            .child(div().text_size(crate::scale::tpx(13.)).child(label.to_string())).child(div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(n.to_string())));
     // its rectangle for the e2e drivers (BACKPLANE_GPUI_RECTS=1 only): `set-adv:<page>`
     let d = if crate::art::rects_on() { let rn = format!("set-adv:{page}"); d.relative().child(crate::art::probe_rect(rn.clone())).child(canvas(|_, _, _| (), move |r: Bounds<Pixels>, _, w: &mut Window, _| crate::art::report(&rn, r, w.scale_factor())).absolute().top_0().left_0().size_full()) } else { d };
     d.on_click(cx.listener(move |this, _, _, cx| toggle_adv(this, &to, cx))).into_any_element()
@@ -1135,6 +1141,12 @@ pub fn device_rows(l: &crate::local::Local) -> Vec<Row> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn settings_nav_ids_differ_for_api_keys_and_keyboard() {
+        use super::nav_el_id;
+        let ids = ["keys", "@keys", "hubs", "@hubs", "accounts", "@accounts"].map(nav_el_id);
+        for (i, a) in ids.iter().enumerate() { for b in &ids[i + 1..] { assert_ne!(a, b); } }
+    }
     use super::*;
     #[test] fn enter_in_the_masked_box_is_its_save() {
         assert_eq!(secret_enter(&serde_json::json!({"thread":{"secretBox":{"save":"@secret\u{1f}gh"}}})).as_deref(), Some("@secret\u{1f}gh"));
