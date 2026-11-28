@@ -1390,7 +1390,7 @@ private fun EntryRow(tid: String, e: DEntry, goTo: (String) -> Unit = {}, reply:
                 }
                 if (e.sending) DMono(Msg.thread_sending, dfaint)
                 else if (e.failed) DMono(Msg.android_send_retry, dcs.error, modifier = Modifier.clickable { DataClient.retry(tid, e) })
-                else { replyLink(); DMono(dStamp(e.at), dfaint) }
+                else { if (e.text.isNotBlank()) CopyButton(e.text, word = true, tag = "thread.entry.copy", size = 12); replyLink(); DMono(dStamp(e.at), dfaint) }
             }
         }
         "assistant" -> Column(Modifier.fillMaxWidth().replySwipe(rr, reply).padding(horizontal = 14.dp, vertical = 6.dp)) {
@@ -1401,7 +1401,8 @@ private fun EntryRow(tid: String, e: DEntry, goTo: (String) -> Unit = {}, reply:
             // the footer: the time, Reply; a long-press on it (the text keeps its own selection) is Reply and Copy
             if (!e.live) { var menu by remember { mutableStateOf(false) }
                 Row(Modifier.padding(top = 4.dp).combinedClickable(onClick = {}, onLongClick = { if (rr != null) menu = true }), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    DMono(dStamp(e.at), dfaint); replyLink()
+                    // Copy the whole message (its Markdown, as the desktop's Copy), beside Reply
+                    DMono(dStamp(e.at), dfaint); replyLink(); if (e.text.isNotBlank()) CopyButton(e.text, word = true, tag = "thread.entry.copy", size = 12)
                     DropdownMenu(menu, { menu = false }) { ReplyMenuItems(e, rr, { menu = false }, reply) }
                 } }
         }

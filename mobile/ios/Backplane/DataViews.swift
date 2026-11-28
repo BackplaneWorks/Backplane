@@ -1716,7 +1716,11 @@ struct DataEntryRow: View {
         if !entry.text.isEmpty { Button(Tr.t("Copy"), systemImage: "doc.on.doc") { UIPasteboard.general.string = entry.text } }
     }
     private var replyButton: some View {
-        Group { if let r = replyRef { Button(Tr.t("Reply")) { reply(r) }.dmono(11).foregroundStyle(BackplaneDesign.faint).buttonStyle(.plain).accessibilityIdentifier("data.entry.reply") } }
+        // Copy the whole message (its Markdown, as the desktop's Copy), beside Reply
+        Group {
+            if !entry.text.isEmpty && !entry.live && !entry.sending { DCopyButton(text: entry.text, word: true).accessibilityIdentifier("data.entry.copy") }
+            if let r = replyRef { Button(Tr.t("Reply")) { reply(r) }.dmono(11).foregroundStyle(BackplaneDesign.faint).buttonStyle(.plain).accessibilityIdentifier("data.entry.reply") }
+        }
     }
     var body: some View {
         switch entry.kind {

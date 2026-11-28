@@ -1022,6 +1022,8 @@ object DataClient {
     /** Buy it on a project's page: the hub's button for the project, naming the thread it buys from (`thread.buy {project}`); null when there is nothing to buy. */
     /** The top of a project's page (feature "projectcard"): its goal and its boards by name; null from a hub without it. */
     data class ProjectCard(val goal: String, val boards: List<String>, val leadDays: Int = 0, val estimateWarnings: String = "")
+    /** A project's goal and notes as written (`.backplane/intent.md`, feature `projecthome`'s `project.home`); "" when there are none. */
+    suspend fun projectIntent(project: String): String = if (!has("projecthome")) "" else call("project.home", JSONObject().put("project", project)).optString("intent")
     suspend fun projectCard(project: String): ProjectCard? {
         if (!has("projectcard")) return null
         val o = call("project.card", JSONObject().put("project", project))

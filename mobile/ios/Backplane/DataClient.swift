@@ -1374,6 +1374,11 @@ final class DataClient {
     func search(_ q: String) async -> DSearch? { try? await call("search", ["q": q]) }
     func buyOf(_ thread: String) async -> DBuy? { guard has("buy") else { return nil }; return (try? await call("thread.buy", ["thread": thread], as: DBuyReply.self))?.buy }
     /// Buy it on a project's page: the hub's button for the project, naming the thread it buys from (`thread.buy {project}`); nil when there is nothing to buy.
+    /// A project's goal and notes as written (`.backplane/intent.md`, feature `projecthome`'s `project.home`); "" when there are none.
+    func projectIntent(_ project: String) async -> String {
+        guard has("projecthome"), let r = try? await call("project.home", ["project": project], as: DProjectHome.self) else { return "" }
+        return r.intent
+    }
     func projectCard(_ project: String) async -> DProjectCard? { guard has("projectcard") else { return nil }; return try? await call("project.card", ["project": project], as: DProjectCard.self) }
     func buyOfProject(_ project: String) async -> DBuy? { guard has("buy"), let b = (try? await call("thread.buy", ["project": project], as: DBuyReply.self))?.buy, !b.thread.isEmpty else { return nil }; return b }
     func buy(_ thread: String) async throws -> String { try await call("order.buy", ["thread": thread], as: DThreadRef.self).thread }
@@ -1664,3 +1669,8 @@ final class DataClient {
         }
     }
 }
+
+/// `project.home`'s goal and notes (the rest of its answer is read elsewhere or not on the phone).
+struct DProjectHome: Decodable { var intent: String
+    enum CodingKeys: String, CodingKey { case intent }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); intent = (try? c.decode(String.self, forKey: .intent)) ?? "" } }

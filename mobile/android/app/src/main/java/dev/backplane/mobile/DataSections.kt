@@ -691,6 +691,24 @@ fun SectionProjectMenu(p: DSecRow, newSwarm: (String) -> Unit = {}, close: () ->
             else LaunchedEffect(Unit) { done() } }
     }
 }
+/** A folded note of a project's page (README, Goal & notes): the head as a section's, the text in the app's Markdown when opened; `load` runs then. */
+@Composable
+private fun ProjectNote(title: String, tag: String, empty: String, load: suspend () -> String?) {
+    var open by remember { mutableStateOf(false) }
+    var text by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(open) { if (open && text == null) text = runCatching { load() }.getOrNull().orEmpty() }
+    Column(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth().height(36.dp).clickable { open = !open }.padding(start = 12.dp, top = 6.dp).testTag("project.page.$tag"), verticalAlignment = Alignment.CenterVertically) {
+            Icon(if (open) Icons.Default.ExpandMore else Icons.Default.ChevronRight, null, tint = dcs.onSurfaceVariant, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(6.dp))
+            DMono(title, dcs.onSurfaceVariant, 11)
+        }
+        if (open) when (val t = text) {
+            null -> DMono(Msg.viewer_loading, dfaint, 12, Modifier.padding(horizontal = 14.dp, vertical = 6.dp))
+            else -> if (t.isBlank()) DMono(empty, dfaint, 12, Modifier.padding(horizontal = 14.dp, vertical = 6.dp), lines = 4)
+                else MdText(t, Modifier.padding(horizontal = 14.dp, vertical = 6.dp).testTag("project.page.$tag.text"))
+        }
+    }
+}
 @Composable
 fun SectionRename(s: DSection, close: () -> Unit) { TextPrompt(Msg.sidebar_sections_rename, s.title, Msg.menu_rename, close) { DataClient.sidebarAct("group-rename", s.group + "\u001f" + it) } }
 
@@ -749,6 +767,9 @@ fun ProjectPageScreen(p: DSecRow, open: (String) -> Unit, newThread: (String) ->
             }
         }
         val ls = lists
+        val notesOf = DataClient.projects.firstOrNull { it.key.isNotEmpty() && it.key == p.key }
+        var readme by remember(notesOf?.id) { mutableStateOf<String?>(null) }
+        LaunchedEffect(notesOf?.id, DataClient.conn) { if (notesOf != null && DataClient.conn == DataClient.Conn.ONLINE) readme = DataClient.fileBytes("project-home-" + notesOf.id, "README.md")?.toString(Charsets.UTF_8) }
         if (ls == null) { DMono(Msg.viewer_loading, dfaint, 12, Modifier.padding(16.dp)); return@Column }
         LazyColumn(Modifier.fillMaxSize().testTag("project.page")) {
             for (s in ls) {
@@ -762,6 +783,11 @@ fun ProjectPageScreen(p: DSecRow, open: (String) -> Unit, newThread: (String) ->
                 items(s.rows, key = { "pgt:${s.id}:${it.id}" }) { r -> val room = r.swarmRoom; SectionThread(r, openThread = open) { if (room != null) openSwarm(room) else open(it) } }
             }
             if (ls.all { it.rows.isEmpty() && it.count == 0 }) item("pg:none") { DMono(Msg.android_threads_none, dfaint, 12, Modifier.padding(16.dp)) }
+            // under the threads, as the desktop's project page: its README (when it has one) and its goal and notes, folded, read-only
+            notesOf?.let { pr ->
+                if (readme != null) item("pg:readme") { ProjectNote(Msg.gpui_readme.uppercase(), "readme", "") { readme } }
+                if (DataClient.has("projecthome")) item("pg:goal") { ProjectNote(Msg.gpui_goal_notes, "goal", Msg.gpui_no_goal_yet_ask_an) { DataClient.projectIntent(pr.id) } }
+            }
         }
     }
 }
