@@ -228,9 +228,13 @@ pub fn group_name(h: &str) -> String {
     let key = format!("gpui.settings.group.{}", h.to_lowercase());
     if crate::i18n::catalog().has_lang(&key, crate::i18n::Lang::En) { crate::i18n::t(&key) } else { trs(h) }
 }
-/// A page list entry's icon keeps its size, and its title ends in "…" when the list is narrow (it never runs under the icon).
-fn nav_icon_el(icon: AnyElement) -> Div { div().flex_shrink_0().child(icon) }
-fn nav_title(t: &str) -> Div { div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(trs(t)) }
+/// A page list entry's icon keeps its size and sits on its title's first line; a title too long for the list wraps onto a second line
+/// (never cut, never under the icon).
+fn nav_icon_el(icon: AnyElement) -> Div { div().flex_shrink_0().mt(px(((13. * NAV_LINE * crate::scale::s() - 16.) / 2.).max(0.))).child(icon) }
+fn nav_title(t: &str) -> Div { div().flex_1().min_w_0().child(trs(t)) }
+/// A text line's height over its size (gpui's default line height, the golden ratio): the nav's 16 px icon is centred on its title's first
+/// line by a margin above it, so the entry is no taller than its title.
+const NAV_LINE: f32 = 1.618;
 /// An icon (from the set the client carries) for each page.
 pub fn nav_icon(page: &str) -> &'static str {
     match page { "appearance" => "sun", "threads" => "message-square", "git" => "git-branch", "notifications" => "bell", "agents" => "cpu", "mcp" => "plug", "writing" => "square-pen", "cad" => "circuit-board", "ordering" => "shopping-cart",
@@ -348,7 +352,10 @@ pub struct FieldSlot { pub input: Entity<Composer>, pub vault: bool, pub hub: St
 impl FieldSlot { fn remember(&mut self, t: &str) { self.echo.remember(t); } }
 
 /// The settings fields that hold a path or a short value: one line tall, beside their row's button (the rest, words to write, wrap).
-pub const ONE_LINE: &[&str] = &["kpath", "fpath", "scpath", "tzname", "whurl", "whsec", "bstart", "qfrom", "qto", "maddr", "mcode", "kname"];
+/// An always-on machine's address and code too, and setup's boxes of that kind (`ob*`: the first project's folder, where KiCad and FreeCAD
+/// are, the always-on address and code), so a box keeps its height while a path is typed and the button beside it stays where it was.
+pub const ONE_LINE: &[&str] = &["kpath", "fpath", "scpath", "tzname", "whurl", "whsec", "bstart", "qfrom", "qto", "maddr", "mcode", "kname", "aonaddr", "aoncode",
+    "obproject", "obkicad", "obfreecad", "obaonaddr", "obaoncode"];
 /// One composer per field name. A form field's typing goes out as `bfield`, coalesced (the first change at once, the rest the newest after
 /// 30 ms); the hub's value is taken only when it is a real change. A vault field holds its text here and sends nothing until Save.
 pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
@@ -778,7 +785,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
             NavLine::Item { id, title, hits } => {
                 let on = match id.as_str() { "@keys" => on_keys, "@hubs" => on_hubs, "@accounts" => on_acct, p => !on_keys && !on_acct && !on_hubs && p == page };
                 let el_id = match id.as_str() { "@keys" => "set-nav-keys".to_string(), "@hubs" => "set-nav-hubs".to_string(), "@accounts" => "set-nav-accounts".to_string(), p => format!("set-nav-{p}") };
-                let item = div().id(SharedString::from(el_id)).flex().items_center().gap_3().px_3().py(px(3.)).cursor_pointer().text_size(crate::scale::tpx(13.)).border_l_2().border_color(c(if on { "accent" } else { "bg" }));
+                let item = div().id(SharedString::from(el_id)).flex().items_start().gap_3().px_3().py(px(3.)).cursor_pointer().text_size(crate::scale::tpx(13.)).border_l_2().border_color(c(if on { "accent" } else { "bg" }));
                 let item = if on { item.bg(c("raise")) } else { item.text_color(c("text")).hover(|s| s.bg(c("panel"))) };
                 // its rectangle for the e2e drivers (BACKPLANE_GPUI_RECTS=1 only), named as its control is: `set-nav:<page>`
                 let item = if crate::art::rects_on() { let rn = format!("set-nav:{id}"); item.relative().child(canvas(|_, _, _| (), move |r: Bounds<Pixels>, _, w: &mut Window, _| crate::art::report(&rn, r, w.scale_factor())).absolute().top_0().left_0().size_full()) } else { item };
@@ -906,6 +913,11 @@ mod tests {
         let f = fit(800., 600.); assert_eq!(f.nav, 180.);
         let f = fit(600., 500.); assert_eq!((f.nav, f.gutter), (150., 12.)); assert!(f.rows > 300., "the rows keep room to read");
         let f = fit(420., 600.); assert!(f.rows >= 200., "{f:?}");
+    }
+    #[test] fn setup_path_boxes_keep_one_line_while_typing() {
+        // a wrapped default path and a shorter typed one moved "Use this folder" up a line under the pointer
+        for n in ["obproject", "obkicad", "obfreecad", "obaonaddr", "obaoncode", "aonaddr", "aoncode"] { assert!(ONE_LINE.contains(&n), "{n}"); }
+        assert!(!ONE_LINE.contains(&"obfirst"), "the first task is words to write: it wraps");
     }
     #[test] fn a_row_keeps_its_words_readable_and_its_chips_inside_the_room_they_have() {
         let fonts: Vec<f32> = ["Noto Sans Mono", "JetBrains Mono", "Fira Code", "IBM Plex Mono", "Source Code Pro"].iter().map(|l| chip_w(l)).collect();

@@ -34,7 +34,7 @@ Not seen by the checks: icons and boxes without text (an icon drawn over a label
 
 ## Screens
 
-`scenarios.json`: home with long titles, sidebar fold, the model picker (open), the command palette, thread menu, hub picker, Improvements, Settings (This device, Hubs, Accounts, every hub page), the viewers (Board, Schematic, 3D, Mech, Files, Diff, Review, Terminal) and a thread with a streaming turn.
+`scenarios.json`: home with long titles, sidebar fold, the model picker (open), the command palette, thread menu, hub picker, Improvements, Settings (every page: the hub's, Keyboard, Accounts and Hubs; Notifications and Mouse and trackpad again with Advanced open), the viewers (Board, Schematic, 3D, Mech, Files, Diff, Review, Terminal) and a thread with a streaming turn.
 
 ## Running it
 
