@@ -274,7 +274,7 @@ impl Backplane {
         }
         // the person's pick on a runs-on line, kept here: a page's Send goes only to that machine (projects::page_send)
         let pick = m.items.get(i).filter(|it| it.action == "run-on").and_then(|it| it.value.split_once('|')).map(|(p, t)| (p.to_string(), t.to_string()));
-        if m.items.get(i).map_or(false, |it| it.action == "new-thread") { self.arm_new(); }
+        if m.items.get(i).map_or(false, |it| it.action == "new-thread" || super::tools::makes_thread(&it.action)) { self.arm_new(); }
         if let Some((p, to)) = pick { self.screens.projects.picked.insert(p, to); }
         let Some(m) = self.screens.ctx.as_mut() else { return };
         let step = press(m, i, &self.data);

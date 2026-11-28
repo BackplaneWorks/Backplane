@@ -1167,7 +1167,7 @@ impl Backplane {
             /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::Rail(kind) => { let cmd = self.rail_view(kind, cx); let shut = matches!(&cmd, crate::hub::Command::Action(_, k) if k.is_empty()); let _ = self.tx.try_send(cmd); self.ui_epoch += 1; if shut { "view.action view close".into() } else { "view.action view".into() } }
             /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::Mgmt(a) => { crate::screens::mgmt::act(self, a, cx); self.ui_epoch += 1; format!("mgmt {a}") }
             Ctl::Dictate => { self.voice_press(cx); "dictate".into() }
-            /* i18n-ok: scripted e2e input and its metrics */ Ctl::ThreadMenu => { let items = crate::screens::ctxmenu::title_items(&self.data); let n = items.len(); if n > 0 { self.ctx_open(point(px(320.), px(40.)), items, cx); } self.ui_epoch += 1; format!("thread menu {n}") }
+            /* i18n-ok: scripted e2e input and its metrics */ Ctl::ThreadMenu => { let items = self.title_menu(); let n = items.len(); if n > 0 { self.ctx_open(point(px(320.), px(40.)), items, cx); } self.ui_epoch += 1; format!("thread menu {n}") }
             /* i18n-ok: scripted e2e input and its metrics */ Ctl::PickFiles => { self.pick_files(cx); self.ui_epoch += 1; "attach picker".into() }
             /* i18n-ok: scripted e2e input and its metrics */ Ctl::ToggleSidebar => { self.sidebar_toggle(cx); "toggle sidebar".into() }
             /* i18n-ok: scripted e2e input and its metrics */ Ctl::ToggleContext => { self.screens.ctx_open = !self.screens.ctx_open; self.ui_epoch += 1; cx.notify(); "context panel".into() }

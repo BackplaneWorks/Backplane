@@ -1089,8 +1089,8 @@ impl Render for Backplane {
         if head_thread {
             let cells = crate::screens::panels::cells(cx, light, &self.screens.panels, thread);
             let st = crate::screens::head::state(cx, light, thread, cells, self.screens.head.state.clone());
-            let tl = crate::screens::head::strip(cx, light, thread, &self.local, head.icons);
-            let menu = { let items = crate::screens::tools::context_items(thread); cx.listener(move |this: &mut Self, e: &MouseDownEvent, _, cx| { if !items.is_empty() { this.ctx_open(e.position, items.clone(), cx); } }) };
+            let tl = crate::screens::head::strip(cx, light, thread, &self.local, head);
+            let menu = { let mut items = crate::screens::head::dropped_items(thread, self.screens.head.dropped.get()); items.extend(crate::screens::tools::context_items(thread)); cx.listener(move |this: &mut Self, e: &MouseDownEvent, _, cx| { if !items.is_empty() { this.ctx_open(e.position, items.clone(), cx); } }) };
             if head.one { top_mid = Some(with_rect(div().id("thread-head-top"), || "pane-row-reference".into()).flex_1().min_w_0().h(crate::scale::tpx(crate::screens::head::ROW_H)).overflow_hidden().flex().items_center().mx(px(crate::screens::head::GAP)).on_mouse_down(MouseButton::Right, menu).child(st).child(div().flex_1().min_w(px(crate::screens::head::GAP))).child(tl).into_any_element()); }
             else { head_row = Some(with_rect(div().flex_shrink_0(), || "pane-row-reference".into()).child(div().id("thread-head").h(crate::scale::tpx(crate::screens::head::ROW_H)).flex_shrink_0().flex().items_center().relative().pr(px(crate::screens::head::ROW_END)).border_b_1().border_color(c("rule")).child(crate::screens::head::measure(cx, self.screens.head.row.clone())).on_mouse_down(MouseButton::Right, menu).child(st).child(div().flex_1().min_w(px(crate::screens::head::GAP))).child(tl)).into_any_element()); }
         }
@@ -1341,10 +1341,10 @@ impl Render for Backplane {
                     .children(head_thread.then(|| crate::screens::planmode::top_mark(light, thread)).flatten())
                     .when(head_thread, |d| d.child(div().text_color(c("faint")).child("/")).child(div().id("thread-title").relative().min_w_0().flex().font_weight(FontWeight::BOLD).child(crate::screens::head::measure(cx, self.screens.head.title.clone())).child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(string(thread, "title")))
                         // the name is not a button (Rename is in its menu): a right click on it, or the ▾ beside it, opens the thread's menu
-                        .on_mouse_down(MouseButton::Right, cx.listener(|this, e: &MouseDownEvent, _, cx| { let items = crate::screens::ctxmenu::title_items(&this.data); if !items.is_empty() { this.ctx_open(e.position, items, cx); } })))
+                        .on_mouse_down(MouseButton::Right, cx.listener(|this, e: &MouseDownEvent, _, cx| { let items = this.title_menu(); if !items.is_empty() { this.ctx_open(e.position, items, cx); } })))
                         /* i18n-ok: ui: ids (tips go through keys::tip, words through trs) */ .child(with_rect(div().id("thread-menu"), || "ui:Thread menu".to_string()).px_1().h_full().flex().items_center().cursor_pointer().hover(|s| s.bg(c("raise")))
                             // the menu drops from under the ▾
-                            .on_mouse_down(MouseButton::Left, cx.listener(|this, e: &MouseDownEvent, _, cx| { cx.stop_propagation(); let items = crate::screens::ctxmenu::title_items(&this.data); if !items.is_empty() { this.ctx_open(point(e.position.x - px(8.), e.position.y + px(14.)), items, cx); } }))
+                            .on_mouse_down(MouseButton::Left, cx.listener(|this, e: &MouseDownEvent, _, cx| { cx.stop_propagation(); let items = this.title_menu(); if !items.is_empty() { this.ctx_open(point(e.position.x - px(8.), e.position.y + px(14.)), items, cx); } }))
                             .child(ic(light, "chevron-down", 14., "dim")))))
                 .children(top_mid)
                 // the window's own controls: Jump gives up room first (down to 120 px) on a narrow window, so Settings is never cut off
@@ -1835,6 +1835,14 @@ pub(crate) fn home_move_dismissible(home: &Value) -> bool {
 /// Command sent when the user dismisses a failed home-move banner.
 pub(crate) fn home_move_dismiss_cmd() -> Command {
     Command::Rpc("home.move.dismiss".into(), crate::screens::settings::Secret(serde_json::json!({})), "home-move-dismiss")
+}
+
+impl Backplane {
+    /// The ▾ menu by the thread's name: the header's tools a tight header did not draw, then the thread's own items (ctxmenu::title_items).
+    pub(crate) fn title_menu(&self) -> Vec<crate::screens::ctxmenu::Item> {
+        let mut v = crate::screens::head::dropped_items(&self.data["thread"], self.screens.head.dropped.get());
+        v.extend(crate::screens::ctxmenu::title_items(&self.data)); v
+    }
 }
 
 /// Whether the bot/swarm page and bar may cover the main column (suppressed while a project page is open).
