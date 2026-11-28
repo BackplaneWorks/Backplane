@@ -1374,6 +1374,8 @@ object DataClient {
     suspend fun screenBytes(tid: String): ByteArray? = withContext(Dispatchers.IO) { httpGet("/bots/" + android.net.Uri.encode(tid) + "/screen.jpg", "") }
 
     // ---- diff and review (features diff, review; the hub's git.diff and review.* requests)
+    /** The Diff header's Commit & push (`commit_push`) and PR (`commit_push_pr`): the hub's git in the thread's folder; git's answer lines. */
+    suspend fun gitAct(tid: String, action: String): String = call("viewer.git", JSONObject().put("thread", tid).put("action", action)).optString("text")
     suspend fun diff(tid: String): Pair<String, String> { val r = call("viewer.diff", JSONObject().put("thread", tid)); return r.optString("diff") to r.optString("nogit") }
     data class Task(val text: String, val done: Boolean, val group: String)
     data class Report(val md: String, val err: String, val gate: String, val line: String, val tasks: List<Task>)

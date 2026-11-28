@@ -4006,6 +4006,9 @@ mobile.diff.binary = binary
 mobile.settings.advanced = Advanced
 android.attach.file = Choose a file
 android.connecting.word = connecting
+android.diff.pr = PR
+android.diff.commit.ask = Commit this thread''s changes with its title as the message, then push them?
+android.diff.pr.ask = Commit this thread''s changes, push them and open a pull request?
 # ---- ios: new entries go here ----
 ios.sections.running = {n, number} running
 ios.alerts.ask = Bub can alert you when a thread needs you.

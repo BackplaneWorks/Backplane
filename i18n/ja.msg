@@ -4029,6 +4029,9 @@ mobile.diff.binary = バイナリ
 mobile.settings.advanced = 詳細設定
 android.attach.file = ファイルを選ぶ
 android.connecting.word = 接続中
+android.diff.pr = PR
+android.diff.commit.ask = このスレッドの変更をタイトルをメッセージとしてコミットし、プッシュしますか？
+android.diff.pr.ask = このスレッドの変更をコミットしてプッシュし、プルリクエストを開きますか？
 # ---- ios: new entries go here ----
 ios.sections.running = {n, number}件実行中
 ios.alerts.ask = スレッドがあなたを必要とするとき、Bub が通知できます。
