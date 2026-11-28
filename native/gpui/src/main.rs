@@ -399,7 +399,10 @@ impl Backplane {
         self.screens.projects.view_edit=Some((id.rsplit('|').next().unwrap_or("").to_string(),kind));
         let (page,keep)=(self.project_page.clone(),self.input.read(cx).content.to_string());self.select_id(id,cx);self.project_page=page;self.input.update(cx,|i,cx|i.set(keep,cx));}
     /// An action for the hub from a click or key; one that goes somewhere (projects::leaves_page) closes the project's page first.
-    pub fn go(&mut self,action:&str,value:String,cx:&mut Context<Self>){if action=="open-thread" {if !value.is_empty() {self.select_id(value,cx);} return} if screens::projects::leaves_page(action)&&self.project_page.take().is_some(){self.ui_epoch+=1;}let _=self.tx.try_send(Command::Action(action.into(),value));cx.notify();}
+    pub fn go(&mut self,action:&str,value:String,cx:&mut Context<Self>){if action=="open-thread" {if !value.is_empty() {self.select_id(value,cx);} return} if screens::projects::leaves_page(action)&&self.project_page.take().is_some(){self.ui_epoch+=1;}
+        // a bot or a room opened from the sidebar: its box takes the keys at once, as a thread's does (select_id); its page follows (glue.rs, bots::focus_key)
+        if matches!(action,"bot"|"room"){self.want_focus=true;}
+        let _=self.tx.try_send(Command::Action(action.into(),value));cx.notify();}
     pub(crate) fn select_id(&mut self,id:String,cx:&mut Context<Self>) {let page_open=self.project_page.take().is_some();self.ui_epoch+=1;self.screens.panels.sub_view=None;
         let raw=id.rsplit_once('|').map_or(id.as_str(),|(_,id)|id).to_string();
         // over a project's page the box held the page's text, not the thread's draft: the thread keeps its own
