@@ -1740,7 +1740,7 @@ private fun NewThreadScreen(project: String, back: () -> Unit, created: (String)
     if (bytes == null) { Box(Modifier.size(size.dp, (size / 2).dp).background(dcs.surfaceVariant)); return }
     PicZoomable(bytes, size, zoom)
 }
-@Composable private fun PicByReply(entry: String, path: String, size: Int) {
+@Composable internal fun PicByReply(entry: String, path: String, size: Int) {
     var b by remember(entry, path) { mutableStateOf<ByteArray?>(null) }
     LaunchedEffect(entry, path) { b = DataClient.replyImage(entry, path) }
     val bytes = b

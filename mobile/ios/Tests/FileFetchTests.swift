@@ -13,7 +13,9 @@ check(FileFetch.shareRoute("/s/\(tok)/POWER_TEST.md?inline=1#top") == "/s/\(tok)
 check(FileFetch.shareRoute("/s/\(tok)/my%20case.step") == "/s/\(tok)/my%20case.step", "share, encoded name")
 check(FileFetch.shareRoute("/s/short/gerbers.zip") == nil, "short token")
 check(FileFetch.shareRoute("/s/\(tok)/a/b.zip") == nil, "a folder in the name")
-for bad in ["..\\..\\file?path=%2Fx", "..", ".", "a?b", "a#b", "a\\b", "%zz", "a b"] { check(FileFetch.shareRoute("/s/\(tok)/\(bad)") == nil, "not a share: \(bad)") }
+for bad in ["..\\..\\file?path=%2Fx", "..", ".", "a\\b", "%zz", "a b", "?b", "#b"] { check(FileFetch.shareRoute("/s/\(tok)/\(bad)") == nil, "not a share: \(bad)") }
+// a query or a fragment after the name is dropped, never sent: the route is the name alone
+for cut in ["a?b", "a#b", "a?path=%2Fx#L3"] { check(FileFetch.shareRoute("/s/\(tok)/\(cut)") == "/s/\(tok)/a", "query and fragment dropped: \(cut)") }
 check(FileFetch.isShare("/s/\(tok)/a.zip") && !FileFetch.isShare("/file"), "is share")
 let base = URL(string: "http://h:3787/")!
 check(FileFetch.url(base: base, route: "/s/\(tok)/my%20case.step")?.absoluteString == "http://h:3787/s/\(tok)/my%20case.step", "share url kept as written \(String(describing: FileFetch.url(base: base, route: "/s/\(tok)/my%20case.step")))")

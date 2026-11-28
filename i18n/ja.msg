@@ -4500,6 +4500,17 @@ mobile.snooze.wakes = {time}後に再開
 mobile.bench.all = すべてのプロジェクト
 mobile.snooze.for = スヌーズする期間
 mobile.conn.reconnecting = 再接続中…
+ios.enterprise.alerts = Enterprise の通知
+ios.enterprise.url.https = サーバーのアドレスは https:// で始めてください
+ios.enterprise.token.enter = アカウントのトークンを入力してください
+ios.enterprise.url.invalid = サーバーのアドレスが正しくありません
+ios.enterprise.token.unsaved = トークンをこの電話に保存できませんでした
+ios.enterprise.token.refused = そのトークンは受け付けられませんでした
+ios.enterprise.too.many = 試行が多すぎます。少し待ってください
+ios.enterprise.server.answered = サーバーの応答
+ios.enterprise.registered = 登録済み
+ios.enterprise.registered.muted = 登録済み、通知はオフ
+ios.enterprise.expired = サインインの期限切れ、または取り消し
 # ---- end ----
 # the sidebar's sections (docs/ALWAYS-ON.md section 8): the hub's words, and the window's
 sidebar.sections.needs = 対応が必要

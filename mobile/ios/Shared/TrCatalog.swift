@@ -500,6 +500,17 @@ mobile.snooze.wakes	Wakes in {time}	{time}後に再開	Vuelve en {time}
 mobile.bench.all	All projects	すべてのプロジェクト	Todos los proyectos
 mobile.snooze.for	Snooze for	スヌーズする期間	Posponer
 mobile.conn.reconnecting	Reconnecting…	再接続中…	Reconectando…
+ios.enterprise.alerts	Enterprise alerts	Enterprise の通知	Alertas de Enterprise
+ios.enterprise.url.https	The server address must start with https://	サーバーのアドレスは https:// で始めてください	La dirección del servidor debe empezar por https://
+ios.enterprise.token.enter	Enter your account token	アカウントのトークンを入力してください	Introduce el token de tu cuenta
+ios.enterprise.url.invalid	The server address is not valid	サーバーのアドレスが正しくありません	La dirección del servidor no es válida
+ios.enterprise.token.unsaved	The token could not be saved on this phone	トークンをこの電話に保存できませんでした	No se pudo guardar el token en este teléfono
+ios.enterprise.token.refused	That token was not accepted	そのトークンは受け付けられませんでした	Ese token no fue aceptado
+ios.enterprise.too.many	Too many tries, wait a moment	試行が多すぎます。少し待ってください	Demasiados intentos, espera un momento
+ios.enterprise.server.answered	The server answered	サーバーの応答	El servidor respondió
+ios.enterprise.registered	Registered	登録済み	Registrado
+ios.enterprise.registered.muted	Registered, alerts off	登録済み、通知はオフ	Registrado, alertas desactivadas
+ios.enterprise.expired	Sign-in expired or revoked	サインインの期限切れ、または取り消し	Sesión caducada o revocada
 common.cancel	Cancel	キャンセル	Cancelar
 common.delete	Delete	削除	Eliminar
 common.save	Save	保存	Guardar

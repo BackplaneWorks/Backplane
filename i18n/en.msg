@@ -4477,6 +4477,17 @@ mobile.snooze.wakes = Wakes in {time}
 mobile.bench.all = All projects
 mobile.snooze.for = Snooze for
 mobile.conn.reconnecting = Reconnecting…
+ios.enterprise.alerts = Enterprise alerts
+ios.enterprise.url.https = The server address must start with https://
+ios.enterprise.token.enter = Enter your account token
+ios.enterprise.url.invalid = The server address is not valid
+ios.enterprise.token.unsaved = The token could not be saved on this phone
+ios.enterprise.token.refused = That token was not accepted
+ios.enterprise.too.many = Too many tries, wait a moment
+ios.enterprise.server.answered = The server answered
+ios.enterprise.registered = Registered
+ios.enterprise.registered.muted = Registered, alerts off
+ios.enterprise.expired = Sign-in expired or revoked
 # ---- end ----
 # the sidebar's sections (docs/ALWAYS-ON.md section 8): the hub's words, and the window's
 sidebar.sections.needs = Needs you
