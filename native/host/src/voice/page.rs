@@ -72,6 +72,9 @@ fn mic_row(p: &Prefs, info: &Value) -> Value {
     for x in &list { let n = x["name"].as_str().unwrap_or(""); b.push(btn(&label(n), "setting", &format!("voice.device={n}"), n == cur)) }
     row("Microphone", &format!("A window on the hub's own machine records its {now}. Phones and windows on other machines record their own."), b)
 }
+/// What `voice.page` answers and a `page` frame carries: the rows, the rarely needed ones marked and last as on the desktop's Voice page
+/// (`present::settings::mark_adv`).
+pub fn phone_rows(p: &Prefs, info: &Value) -> Vec<Value> { crate::present::settings::mark_adv("voice", rows(p, info, "", "")) }
 /// The Voice page's rows. `term`: the Add a term field as typed; `key_err`: why the last key was refused.
 pub fn rows(p: &Prefs, info: &Value, term: &str, key_err: &str) -> Vec<Value> {
     let eng = set(p, "voice.engine", "auto");

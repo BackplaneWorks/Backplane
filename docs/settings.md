@@ -31,20 +31,27 @@ Language, Theme, Text size, Font, the 3D background and the layout on Appearance
 Desktop notifications on Notifications, Streamer mode on Privacy. It adds three pages of its own: Keyboard (before Mouse and trackpad;
 the keys that cannot be changed under Advanced), Hubs (after Machines), both kept on this computer, and Accounts (leading Agents). A page
 opens at its top. The phones keep their own pages (`devices.page`, `ring.page`, `notify.page`, ...), unchanged by
-the regrouping, and the web client its own dialog (`web/src/settings.ts`).
+the regrouping, and the web client its own dialog (`web/src/settings.ts`). The phones' `voice.page`, `notify.page` and `machines.page` replies
+(and Voice's `page` frame) carry the same `adv` marks, their rows in the same order (`mark_adv`, below).
 
 A row marked `"adv": true` is rarely needed: a client folds these under Advanced at the end of the page, and a client that does not
 know the mark draws them where they are, last (the hub puts them after every other row, each part in its own order; a heading so
-marked comes only before rows so marked). Under Advanced: the webhook (Notifications), Short grace for read conversations and Largest
-attachment (Threads and git), each input of Mouse and trackpad under "Board and schematic: each input" and "3D and STEP: each input"
-(the page itself shows the zoom direction and the two presets), Bots: infinite context, the failover order and the writing model
-(Agents), How eager, End of turn: Jev, Voice commands and Send after silence (Voice), KiCad over its API, Board 3D and Open designs in
-(CAD), and Developer (Setup).
+marked comes only before rows so marked). Under Advanced: the webhook and iPhones that hear a push while there are none (Notifications),
+Short grace for read conversations and Largest attachment (Threads and git), each input of Mouse and trackpad under "Board and schematic:
+each input" and "3D and STEP: each input" (the page itself shows the zoom direction and the two presets), Bots: infinite context, the
+failover order and the writing model (Agents), Dictionary, Learned fixes, Pebble ring, How eager, End of turn: Jev, Jev check, Voice
+commands and Send after silence (Voice), KiCad over its API, Board 3D and Open designs in (CAD), Home, Home move and This machine stays on
+(Machines), and Developer (Setup). Rows are picked by label from one table (`present/settings.rs` `ADV`; whole parts such as the webhook or
+Developer are marked where the page adds them) and `mark_adv` marks and orders a page's rows for the desktop and the phones alike. A row that
+warns (`tone`: a home move that failed) is never folded, nor a machine's own row, whatever the person called it. The phones do not address
+these rows by position, so an app that does not know the mark draws the same rows, these last.
 
 Rows follow one pattern. A switch says On and Off (the values stay `on` and `off`). A text box and its button share the row's line, the
 box narrowed by the button. A field the hub says is short (`field_w`: `"w"`, about how many characters it holds; quiet hours' From and Until,
 Machines' pairing code) is drawn that wide, on one line with the row's other short boxes and its buttons, at the right edge the row's chips
-share; a longer box before it keeps its own line above. The phones ignore `w`. A page row the hub marks `"changed": true` lights another choice than a fresh hub would (`mark_changed`: the
+share; a longer box before it keeps its own line above. The phones ignore `w`. Quiet hours' Save takes the two boxes as sent: a box sent
+empty (the desktop sends the one not touched empty) is the saved end, else the default's, both empty change nothing, and a typed time that
+is not HH:MM or makes the two ends the same is refused (`quiet_save`, for the desktop's row and `notify.page.act` alike). A page row the hub marks `"changed": true` lights another choice than a fresh hub would (`mark_changed`: the
 page built again from an empty state, rows matched by label); with `"reset": {action, value}` it says the press that puts it back, and the
 desktop draws a small mark after the label and Reset beside it. This computer's rows are marked the same way against a fresh install, and a
 shortcut when its key is not its default, with Reset beside it for that one (Shortcuts to defaults puts them all back). A press on a
