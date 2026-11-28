@@ -56,6 +56,9 @@ pub fn lean_keeps(k: &str) -> bool {
     if k.starts_with("unanswered.") { return true } // #1304: the thread view draws the "hasn't answered" notice from it (agents/unanswered.rs)
     // setup (present/onboard.rs): the step reached, the skipped and seen lists, done, and the last checks of this machine (a few KB, replaced each time)
     if k.starts_with("onboard.") || k == "freecad.path" { return true }
+    // setup's "Where your uberbot lives" (present/onboard_alwayson.rs): the choice made and the other machine picked, a word and a short
+    // record. Without them the step never read as done: Stay on this computer showed Chosen, and Done still listed it as "Not done."
+    if k == "alwayson.choice" || k == "alwayson.other" { return true }
     k.starts_with("launch.input.") || k.starts_with("fallback.input.") || (!k.starts_with("ride.") && KEEP.iter().any(|p| k.starts_with(p)))
 }
 /// the value the lean copy keeps for a setting: a told record keeps a placeholder (its key carries the time), unless it is not one of ours
@@ -278,6 +281,7 @@ mod tests {
         for k in ["tok.dv.2026-11-19|grok", "tok.1b.dv.2026-11-19|pi"] { assert!(lean_keeps(k), "{k}: Settings › Accounts says what a provider without a usage reading ran today (provider_usage.rs)"); }
         for k in ["tok.t.t1", "tok.1b.t.t1", "turn.last.t1", "turn.speed.t1", "turn.models.t1", "turn.live.t1", "tok.epoch", "tok.recount"] { assert!(lean_keeps(k), "{k}"); }
         for k in ["onboard.step", "onboard.skipped", "onboard.seen", "onboard.done", "onboard.checks", "onboard.usage", "freecad.path"] { assert!(lean_keeps(k), "{k}: setup reads it, and without it every press forgets the last"); }
+        for k in ["alwayson.choice", "alwayson.other"] { assert!(lean_keeps(k), "{k}: setup's always-on step reads it to know a choice was made"); }
         for k in ["ride.t1", "tok.basis.t1", "uber.op.u.m.1", "todos.base.t1", "session.t1.claude"] { assert!(!lean_keeps(k), "{k}"); }
     }
     #[test] fn lean_thread_screen_gate_preserves_exact_values_and_only_thread_key_presence() {
