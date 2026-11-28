@@ -385,6 +385,8 @@ struct TextLayoutInner {
     lines: SmallVec<[WrappedLine; 1]>,
     line_height: Pixels,
     wrap_width: Option<Pixels>,
+    /// Backplane: the width an ellipsis text was cut to (a later measure at another width lays it out again)
+    truncate_width: Option<Pixels>,
     size: Option<Size<Pixels>>,
     bounds: Option<Bounds<Pixels>>,
 }
@@ -446,6 +448,7 @@ impl TextLayout {
                 if let Some(text_layout) = element_state.0.borrow().as_ref()
                     && text_layout.size.is_some()
                     && (wrap_width.is_none() || wrap_width == text_layout.wrap_width)
+                    && truncate_width == text_layout.truncate_width
                 {
                     return text_layout.size.unwrap();
                 }
@@ -480,6 +483,7 @@ impl TextLayout {
                         map: None,
                         line_height,
                         wrap_width,
+                        truncate_width,
                         size: Some(Size::default()),
                         bounds: None,
                     });
@@ -499,6 +503,7 @@ impl TextLayout {
                     map: map.clone(),
                     line_height,
                     wrap_width,
+                    truncate_width,
                     size: Some(size),
                     bounds: None,
                 });
