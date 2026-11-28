@@ -568,7 +568,7 @@ fn talk_page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, 
     }
     let hover = reg.borrow().hover.clone();
     let feed = div().flex_1().min_h_0().relative().flex().flex_col().child(list)
-        .when(!hover.is_empty(), |d| d.child(div().absolute().left_0().bottom_0().max_w_full().px_2().py_px().bg(c("raise")).border_t_1().border_r_1().border_color(c("line")).text_size(crate::scale::tpx(11.)).text_color(c("dim")).overflow_hidden().whitespace_nowrap().child(hover)));
+        .when(!hover.is_empty(), |d| d.child(crate::ui::link_address(light, &hover, px(0.))));
     div().size_full().flex().flex_col().child(feed)
         .child(div().flex().gap_2().items_end().p_3().border_t_1().border_color(c("line"))
             .child(div().flex_1().px_2().py_1().border_1().border_color(c("line")).bg(c("view")).children(fields.get(field).map(|s| s.input.clone())))

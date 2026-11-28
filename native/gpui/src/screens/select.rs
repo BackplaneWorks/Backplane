@@ -12,7 +12,13 @@ pub struct Selection { pub anchor: Pos, pub head: Pos }
 
 /// One drawn block's text and the message it belongs to (a blank line separates messages in a copy).
 #[derive(Clone, Debug, PartialEq)]
-pub struct Text { pub text: String, pub entry: usize }
+pub struct Text { pub text: String, pub entry: usize, pub more: More }
+/// What a block adds to its copy: `whole`, all of a row drawn cut to one line (copied from where the selection starts to the row's real end when
+/// the selection runs to the end of what is drawn); `cell`, the table row a cell is in (the cells of one row are joined by a tab, for a sheet);
+/// `tight`, a one-line activity row (one newline to its neighbours rather than the blank line between messages).
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct More { pub whole: Option<String>, pub cell: Option<u64>, pub tight: bool }
+impl Text { pub fn new(text: impl Into<String>, entry: usize) -> Self { Self { text: text.into(), entry, more: More::default() } } }
 
 impl Selection {
     pub fn collapsed(&self) -> bool { self.anchor == self.head }
@@ -45,25 +51,34 @@ pub fn block_range(texts: &[Text], block: usize) -> Option<Selection> {
     Some(Selection { anchor: Pos { block, off: 0 }, head: Pos { block, off: t.text.len() } })
 }
 
-/// The text a Ctrl-C copies: each covered block's part, blocks of one message on separate lines, messages by a blank line.
+/// The text a Ctrl-C copies: each covered block's part, blocks of one message on separate lines, messages by a blank line (an activity row by one
+/// newline), the cells of a table row by a tab; a row drawn cut copies to its real end.
 pub fn extract(texts: &[Text], sel: &Selection) -> String {
     if sel.collapsed() { return String::new(); }
     let (a, b) = sel.ordered();
     let mut out = String::new(); let mut prev: Option<&Text> = None;
     for (i, t) in texts.iter().enumerate().take(b.block + 1).skip(a.block) {
         let (s, e) = (if i == a.block { snap(&t.text, a.off) } else { 0 }, if i == b.block { snap(&t.text, b.off) } else { t.text.len() });
-        if i > a.block { out.push_str(if prev.map_or(false, |p| p.entry != t.entry) { "\n\n" } else { "\n" }); }
-        if s < e { out.push_str(&t.text[s..e]); }
+        if let (Some(p), true) = (prev, i > a.block) { out.push_str(between(p, t)); }
+        if s < e {
+            match &t.more.whole { Some(w) if e == t.text.len() => out.push_str(&w[s.min(common_prefix(&t.text, w))..]), _ => out.push_str(&t.text[s..e]) }
+        }
         prev = Some(t);
     }
     out
 }
+/// What separates two blocks in a copy: a tab between cells of one table row, a newline within a message or next to an activity row, else a blank line.
+fn between(p: &Text, t: &Text) -> &'static str {
+    if p.more.cell.is_some() && p.more.cell == t.more.cell { "\t" } else if p.entry != t.entry && !p.more.tight && !t.more.tight { "\n\n" } else { "\n" }
+}
+/// How many leading bytes two texts share, on a character boundary (a cut row's drawn line and its whole text).
+fn common_prefix(a: &str, b: &str) -> usize { a.char_indices().zip(b.chars()).find(|((_, x), y)| x != y).map_or(a.len().min(b.len()), |((i, _), _)| i) }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use core::prelude::v1::test;
-    fn t(s: &str, entry: usize) -> Text { Text { text: s.into(), entry } }
+    fn t(s: &str, entry: usize) -> Text { Text::new(s, entry) }
     fn p(block: usize, off: usize) -> Pos { Pos { block, off } }
     #[test] fn within_one_block() {
         let s = Selection { anchor: p(0, 2), head: p(0, 5) };
@@ -87,6 +102,24 @@ mod tests {
         let s = Selection { anchor: p(0, 1), head: p(0, 7) };   // inside characters
         let out = extract(&texts, &s); assert!(texts[0].text.contains(&out));
         assert_eq!(extract(&texts, &Selection { anchor: p(0, 0), head: p(5, 99) }), texts[0].text, "past the last block is the end");
+    }
+    // a sheet takes a pasted table as tab-separated rows; the rest of the copy is unchanged
+    #[test] fn a_tables_cells_copy_tab_separated_and_rows_by_line() {
+        let cell = |s: &str, row: u64| Text { more: More { cell: Some(row), ..More::default() }, ..t(s, 0) };
+        let texts = [t("Parts:", 0), cell("Ref", 1), cell("Value", 1), cell("Note", 1), cell("R1", 2), cell("100k", 2), cell("anode load", 2), cell("R2", 3), cell("1k5", 3), cell("cathode bias", 3), t("Done.", 0)];
+        assert_eq!(extract(&texts, &Selection { anchor: p(4, 0), head: p(9, 12) }), "R1\t100k\tanode load\nR2\t1k5\tcathode bias");
+        assert_eq!(extract(&texts, &Selection { anchor: p(0, 0), head: p(10, 5) }), "Parts:\nRef\tValue\tNote\nR1\t100k\tanode load\nR2\t1k5\tcathode bias\nDone.");
+        let empty = [cell("a", 7), cell("", 7), cell("c", 7)];
+        assert_eq!(extract(&empty, &Selection { anchor: p(0, 0), head: p(2, 1) }), "a\t\tc", "an empty cell keeps its column");
+    }
+    #[test] fn activity_rows_copy_in_reading_order_one_line_each_and_whole() {
+        let row = |s: &str, whole: Option<&str>, entry: usize| Text { more: More { whole: whole.map(str::to_string), tight: true, ..More::default() }, ..t(s, entry) };
+        let texts = [t("I will look.", 0), row("grep -n go board.kicad_pcb # 1", None, 1), row("cat <<EOF \u{2026}", Some("cat <<EOF\nline\nEOF"), 2), t("Found it.", 3), t("Next.", 4)];
+        assert_eq!(extract(&texts, &Selection { anchor: p(0, 7), head: p(3, 5) }), "look.\ngrep -n go board.kicad_pcb # 1\ncat <<EOF\nline\nEOF\nFound", "one newline next to a row, the cut one whole");
+        assert_eq!(extract(&texts, &Selection { anchor: p(3, 0), head: p(4, 5) }), "Found it.\n\nNext.", "messages keep their blank line");
+        assert_eq!(extract(&texts, &Selection { anchor: p(2, 4), head: p(2, 6) }), "<<", "a part of what is drawn is itself");
+        assert_eq!(extract(&texts, &Selection { anchor: p(2, 4), head: p(2, 13) }), "<<EOF\nline\nEOF", "to the drawn end: on to the real end");
+        assert_eq!(common_prefix("héllo …", "héllo\nx"), 6); assert_eq!(common_prefix("ab", "abc"), 2);
     }
     #[test] fn word_and_block_selection() {
         assert_eq!(&"alpha beta"[word_at("alpha beta", 7)], "beta"); assert_eq!(&"alpha beta"[word_at("alpha beta", 0)], "alpha");

@@ -11,7 +11,23 @@ pub struct Item { pub label: String, pub action: String, pub value: String, pub 
 #[derive(Clone, Debug)]
 pub struct Menu { pub at: Point<Pixels>, pub items: Vec<Item>, /// the item whose confirming click is awaited
     pub armed: Option<usize>, /// the probe ids of its entries are `<probe>:<label>` ("ctx" unless the opener names its own, e.g. "run-on")
-    pub probe: &'static str }
+    pub probe: &'static str, /// the highlighted row: Up/Down/Home/End move it, the pointer over a row puts it there, Enter or Space takes it
+    pub cur: Option<usize> }
+impl Menu { pub fn new(at: Point<Pixels>, items: Vec<Item>, probe: &'static str) -> Self { Menu { at, items, armed: None, probe, cur: None } } }
+
+/// A key that moves a menu's highlight.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Nav { Up, Down, Home, End }
+/// Where the highlight goes: Down and Up wrap round (with none, Down takes the first row and Up the last), Home and End jump; an empty menu has none.
+pub fn step(cur: Option<usize>, n: usize, key: Nav) -> Option<usize> {
+    if n == 0 { return None }
+    Some(match (key, cur.filter(|&i| i < n)) {
+        (Nav::Home, _) | (Nav::Down, None) => 0,
+        (Nav::End, _) | (Nav::Up, None) => n - 1,
+        (Nav::Down, Some(i)) => (i + 1) % n,
+        (Nav::Up, Some(i)) => (i + n - 1) % n,
+    })
+}
 
 /// The ▾ menu's "Find in thread": the window's own (the find bar over that thread, find.rs).
 pub const LOCAL_SEARCH: &str = "local:search-thread";
@@ -38,12 +54,36 @@ pub const LOCAL_SOLIDCRAFT_OPEN: &str = "local:solidcraft-open";
 pub const LOCAL_DOWNLOAD: &str = "local:download";
 /// An item that opens a second menu where the first was (a project's Move to group): its `value` is the second menu's items, as JSON.
 pub const LOCAL_SUB: &str = "local:sub";
+/// A right click in a text field: the window's own items, acting on that field (`ctx_field`); the value says which ("cut", "copy", "paste", "all").
+pub const LOCAL_FIELD: &str = "local:field";
+/// A right click in the floating terminal: Copy and Paste there ("copy", "paste").
+pub const LOCAL_TERM: &str = "local:term";
+/// Select all in the thread: every block of its rows on screen (`Backplane::timeline_select_all`).
+pub const LOCAL_SELECT_ALL: &str = "local:select-all";
 fn s(v: &Value, k: &str) -> String { v[k].as_str().unwrap_or("").to_string() }
 fn raw(id: &str) -> &str { id.rsplit('|').next().unwrap_or(id) }
 /// A right-click with text selected in the timeline: Copy and Quote (nothing without a selection).
 pub fn selection_items(selected: &str) -> Vec<Item> {
     if selected.is_empty() { vec![] }
     /* i18n-ok: menu labels, drawn through trs/t in render */ else { vec![item("Copy", LOCAL_COPY, selected, false), item("Quote", LOCAL_QUOTE, selected, false)] }
+}
+/// A right-click on a message's text with nothing selected: Copy message (its whole text, as its Copy button gives) and Select all.
+pub fn message_items(text: &str) -> Vec<Item> {
+    /* i18n-ok: menu labels, drawn through trs in render */ let mut v = if text.is_empty() { vec![] } else { vec![item("Copy message", LOCAL_COPY, text, false)] };
+    /* i18n-ok: a menu label, drawn through trs in render */ v.push(item("Select all", LOCAL_SELECT_ALL, "", false)); v
+}
+/// A text field's menu: Cut and Copy with a selection (never a secret's), Paste always, Select all with any text.
+pub fn field_items(has_sel: bool, has_text: bool) -> Vec<Item> {
+    let mut v = Vec::new();
+    /* i18n-ok: menu labels, drawn through trs in render */ if has_sel { v.extend([item("Cut", LOCAL_FIELD, "cut", false), item("Copy", LOCAL_FIELD, "copy", false)]); }
+    /* i18n-ok: a menu label, drawn through trs in render */ v.push(item("Paste", LOCAL_FIELD, "paste", false));
+    /* i18n-ok: a menu label, drawn through trs in render */ if has_text { v.push(item("Select all", LOCAL_FIELD, "all", false)); }
+    v
+}
+/// The floating terminal's menu: Copy with a selection, Paste always.
+pub fn term_items(has_sel: bool) -> Vec<Item> {
+    /* i18n-ok: menu labels, drawn through trs in render */ let mut v = if has_sel { vec![item("Copy", LOCAL_TERM, "copy", false)] } else { vec![] };
+    /* i18n-ok: a menu label, drawn through trs in render */ v.push(item("Paste", LOCAL_TERM, "paste", false)); v
 }
 fn item(label: &str, action: &str, value: &str, confirm: bool) -> Item { Item { label: label.into(), action: action.into(), value: value.into(), confirm, note: String::new() } }
 
@@ -194,10 +234,17 @@ pub fn sub_items(value: &str) -> Vec<Item> {
 /* i18n-ok: menu labels, drawn through trs in render */ fn project_rest(pid_raw: &str) -> Vec<Item> { vec![item("Intent…", LOCAL_INTENT, pid_raw, false), item("Rename", "proj-rename", pid_raw, false), item("Badge", "look", pid_raw, false), item("Remove project", "proj-remove", pid_raw, true)] }
 
 impl Backplane {
+    /// A right click in a text field (composer::FieldMenu): its menu where the pointer was.
+    pub(crate) fn field_menu(&mut self, cx: &mut Context<Self>) {
+        let Some((field, at)) = super::composer::take_field_menu() else { return };
+        let Some((has_sel, has_text)) = field.upgrade().map(|f| f.read(cx).menu_state()) else { return };
+        self.screens.ctx_field = Some(field);
+        self.ctx_open(at, field_items(has_sel, has_text), cx);
+    }
     pub(crate) fn ctx_open(&mut self, at: Point<Pixels>, items: Vec<Item>, cx: &mut Context<Self>) {
         if let Some(c) = self.screens.ctx.as_ref().and_then(disarm) { let _ = self.tx.try_send(c); }
         crate::art::forget_probes("ctx:"); crate::art::forget_probes("run-on:");
-        self.screens.ctx = Some(Menu { at, items, armed: None, probe: "ctx" }); cx.notify();
+        self.screens.ctx = Some(Menu::new(at, items, "ctx")); cx.notify();
     }
     /// A file named in a message: the hub opens it (or shows it in its folder) on its machine; a relative path is from the thread's folder.
     /// A file link pressed (or its menu's Open): the hub opens it inside Backplane (`link-file`: its project's thread, the viewer tab that draws
@@ -236,13 +283,22 @@ impl Backplane {
         let at = anchored(from, window_h, items.len());
         if let Some(c) = self.screens.ctx.as_ref().and_then(disarm) { let _ = self.tx.try_send(c); }
         crate::art::forget_probes("ctx:"); crate::art::forget_probes("run-on:");
-        self.screens.ctx = Some(Menu { at, items, armed: None, probe }); cx.notify();
+        self.screens.ctx = Some(Menu::new(at, items, probe)); cx.notify();
     }
     pub(crate) fn ctx_close(&mut self, cx: &mut Context<Self>) -> bool {
         let Some(m) = self.screens.ctx.take() else { return false };
         crate::art::forget_probes(&format!("{}:", m.probe));
         if let Some(c) = disarm(&m) { let _ = self.tx.try_send(c); }
         cx.notify(); true
+    }
+    /// Up/Down/Home/End in an open menu, wherever the keyboard is (keys.rs binds them under `CtxMenu` at each field's depth, so the field behind it never gets them).
+    pub(crate) fn ctx_nav(&mut self, key: Nav, cx: &mut Context<Self>) {
+        let Some(m) = self.screens.ctx.as_mut() else { return };
+        m.cur = step(m.cur, m.items.len(), key); cx.notify();
+    }
+    /// Enter or Space: what a click on the highlighted row does (a Delete's first press arms it, the second does it); nothing highlighted, nothing done.
+    pub(crate) fn ctx_enter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(i) = self.screens.ctx.as_ref().and_then(|m| m.cur) { self.ctx_click(i, window, cx) }
     }
     fn ctx_click(&mut self, i: usize, window: &mut Window, cx: &mut Context<Self>) {
         let Some(m) = self.screens.ctx.as_mut() else { return };
@@ -259,16 +315,24 @@ impl Backplane {
             Some((a, v)) if a == LOCAL_DOWNLOAD => { self.ctx_close(cx); if let Some((u, n)) = v.split_once('\n') { self.download(u.to_string(), n.to_string(), super::dlbar::From::Other, cx); } return }
             Some((a, _)) if a == LOCAL_SAVE_IMAGE => { self.ctx_close(cx); if let Some(s) = self.screens.ctx_save.take() { self.save_image(s, cx); } return }
             Some((a, _)) if a == LOCAL_COPY_IMAGE => { self.ctx_close(cx); self.copy_image(cx); return }
+            // a text field's Cut, Copy, Paste, Select all: done in that field, and the keyboard goes back to it
+            Some((a, v)) if a == LOCAL_FIELD => {
+                self.ctx_close(cx);
+                if let Some(field) = self.screens.ctx_field.take().and_then(|f| f.upgrade()) { field.update(cx, |c, cx| c.menu_do(&v, window, cx)); window.focus(&field.focus_handle(cx)); }
+                return
+            }
+            Some((a, v)) if a == LOCAL_TERM => { self.ctx_close(cx); self.term_menu_do(&v, window, cx); return }
+            Some((a, _)) if a == LOCAL_SELECT_ALL => { self.ctx_close(cx); self.timeline_select_all(window, cx); return }
             // a second menu, where the first was (Move to group: the other groups, then New group…)
             Some((a, v)) if a == LOCAL_SUB => {
                 let items = sub_items(&v);
-                let (at, probe) = (m.at, m.probe); self.screens.ctx = (!items.is_empty()).then(|| Menu { at, items, armed: None, probe }); cx.notify(); return
+                let (at, probe) = (m.at, m.probe); self.screens.ctx = (!items.is_empty()).then(|| Menu::new(at, items, probe)); cx.notify(); return
             }
             // the second menu, where the first was: the threads this one may go under
             Some((a, v)) if a == LOCAL_MOVE => {
                 let (tid, project) = v.split_once('|').unwrap_or((v.as_str(), ""));
                 let items = parent_choices(&self.data, project, tid);
-                let (at, probe) = (m.at, m.probe); self.screens.ctx = (!items.is_empty()).then(|| Menu { at, items, armed: None, probe }); cx.notify(); return
+                let (at, probe) = (m.at, m.probe); self.screens.ctx = (!items.is_empty()).then(|| Menu::new(at, items, probe)); cx.notify(); return
             }
             _ => {}
         }
@@ -323,22 +387,28 @@ pub fn anchored(from: Bounds<Pixels>, window_h: Pixels, n: usize) -> Point<Pixel
     point(from.origin.x, y)
 }
 
-/// The menu over everything, with a backdrop that closes it.
+/// The menu over everything, with a backdrop that closes it; never past the window's edge.
 pub fn render(cx: &mut Context<Backplane>, light: bool, m: &Menu) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
-    let mut list = div().absolute().left(m.at.x).top(m.at.y).min_w(px(190.)).flex().flex_col().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(crate::scale::tpx(12.)).occlude();
+    let mut list = div().min_w(px(190.)).flex().flex_col().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(crate::scale::tpx(12.)).occlude();
     for (i, it) in m.items.iter().enumerate() {
-        let armed = m.armed == Some(i);
+        let (armed, lit) = (m.armed == Some(i), m.cur == Some(i));
         let label = if armed { shown_armed_label(it) } else if it.action == LOCAL_SUB { format!("{} \u{203a}", crate::i18n::trs(&it.label)) } else if it.action == LOCAL_QUOTE { crate::i18n::t("menu.quote") } else { crate::i18n::trs(&it.label) };
         let danger = it.confirm;
         list = list.child(crate::ui::with_rect(div().id(SharedString::from(format!("ctx-{i}"))), { let (l, pr) = (it.label.clone(), m.probe); move || format!("{pr}:{l}") }).px_3().py_1().cursor_pointer().text_color(if armed || danger { c("bad") } else { c("text") })
-            .when(armed, |d| d.bg(c("raise")).font_weight(FontWeight::BOLD)).hover(|s| s.bg(c("raise"))).child(label)
+            .when(armed, |d| d.font_weight(FontWeight::BOLD)).when(armed || lit, |d| d.bg(c("raise"))).child(label)
+            // one highlight: the pointer over a row moves the keyboard's there (the row's hover look is the highlight)
+            .on_hover(cx.listener(move |this, over: &bool, _, cx| if let Some(m) = this.screens.ctx.as_mut() {
+                let to = if *over { Some(i) } else if m.cur == Some(i) { None } else { m.cur };
+                if to != m.cur { m.cur = to; cx.notify(); }
+            }))
             .on_click(cx.listener(move |this, _, window, cx| this.ctx_click(i, window, cx))));
     }
     div().id("ctx-backdrop").absolute().inset_0().occlude()
         .on_click(cx.listener(|this, _, _, cx| { this.ctx_close(cx); }))
         .on_mouse_down(MouseButton::Right, cx.listener(|this, _, _, cx| { this.ctx_close(cx); }))
-        .child(list).into_any_element()
+        // at the pointer, flipped above or to its left when it would go past the window's edge (a right click near the bottom: a field's menu)
+        .child(gpui::anchored().position(m.at).child(list)).into_any_element()
 }
 
 #[cfg(test)]
@@ -415,9 +485,18 @@ mod tests {
         let pinned = j(r#"{"id":"t1","pinned":true}"#); assert_eq!(thread_items(&pinned, "p")[0].action, "row-unpin");
     }
     fn sent(c: &Option<Command>) -> Option<(String, String)> { match c { Some(Command::Action(a, v)) => Some((a.clone(), v.clone())), _ => None } }
+    #[test] fn the_keyboard_moves_the_highlight_round_the_menu() {
+        use Nav::*;
+        assert_eq!(step(None, 3, Down), Some(0), "the first Down takes the first row"); assert_eq!(step(None, 3, Up), Some(2), "the first Up the last");
+        assert_eq!(step(Some(0), 3, Down), Some(1)); assert_eq!(step(Some(2), 3, Down), Some(0), "Down wraps round"); assert_eq!(step(Some(0), 3, Up), Some(2), "Up wraps round");
+        assert_eq!(step(Some(1), 3, Home), Some(0)); assert_eq!(step(None, 3, End), Some(2)); assert_eq!(step(None, 3, Home), Some(0));
+        assert_eq!(step(Some(7), 3, Down), Some(0), "a row past the end (a shorter second menu) counts as none");
+        for k in [Up, Down, Home, End] { assert_eq!(step(None, 0, k), None, "an empty menu has no highlight"); assert_eq!(step(Some(0), 0, k), None); }
+        assert_eq!(step(Some(0), 1, Down), Some(0)); assert_eq!(step(Some(0), 1, Up), Some(0));
+    }
     #[test] fn delete_asks_in_the_menu_and_the_second_click_deletes() {
         let t = j(r#"{"id":"http://h:1|t7","pinned":false}"#);
-        let mut m = Menu { at: Point::default(), items: thread_items(&t, "p1"), armed: None, probe: "ctx" };
+        let mut m = Menu { at: Point::default(), items: thread_items(&t, "p1"), armed: None, probe: "ctx", cur: None };
         let del = m.items.iter().position(|i| i.action == "row-delete").unwrap();
         let s1 = press(&mut m, del, &Value::Null);
         assert_eq!(sent(&s1.send), Some(("row-delete".into(), "http://h:1|t7".into())), "the first click arms the hub's confirm"); assert!(!s1.close && m.armed == Some(del));
@@ -425,16 +504,16 @@ mod tests {
         let armed = j(r#"{"deleting":{"id":"http://h:1|t7"}}"#);
         let s2 = press(&mut m, del, &armed); assert_eq!(sent(&s2.send), Some(("row-delete".into(), "http://h:1|t7".into()))); assert!(s2.close, "the second click deletes and shuts the menu");
         // the hub forgot the armed delete in between (a sidebar page): the click arms it again, the menu stays
-        let mut m2 = Menu { at: Point::default(), items: thread_items(&t, "p1"), armed: Some(del), probe: "ctx" };
+        let mut m2 = Menu { at: Point::default(), items: thread_items(&t, "p1"), armed: Some(del), probe: "ctx", cur: None };
         let s3 = press(&mut m2, del, &Value::Null); assert!(!s3.close && sent(&s3.send).is_some());
         // shut with Delete armed: the hub's confirm goes too; shut with nothing armed sends nothing
         assert_eq!(sent(&disarm(&m2)), Some(("delete-no".into(), String::new()))); m2.armed = None; assert!(disarm(&m2).is_none());
         // a project's Remove asks in the menu, the hub hears only the second click
-        let mut p = Menu { at: Point::default(), items: project_items("p1"), armed: None, probe: "ctx" };
+        let mut p = Menu { at: Point::default(), items: project_items("p1"), armed: None, probe: "ctx", cur: None };
         let s = press(&mut p, 5, &Value::Null); assert!(s.send.is_none() && !s.close); assert_eq!(armed_label(&p.items[5]), "Click again to remove"); assert!(disarm(&p).is_none());
         let s = press(&mut p, 5, &Value::Null); assert_eq!(sent(&s.send), Some(("proj-remove".into(), "p1".into()))); assert!(s.close);
         // any other item does what it says at once
-        let mut m3 = Menu { at: Point::default(), items: thread_items(&t, "p1"), armed: None, probe: "ctx" }; let s = press(&mut m3, 0, &Value::Null); assert!(s.close && sent(&s.send).unwrap().0 == "row-pin");
+        let mut m3 = Menu { at: Point::default(), items: thread_items(&t, "p1"), armed: None, probe: "ctx", cur: None }; let s = press(&mut m3, 0, &Value::Null); assert!(s.close && sent(&s.send).unwrap().0 == "row-pin");
     }
     #[test] fn the_thread_names_menu_asks_before_its_delete_too() {
         let d = j(r#"{"thread":{"id":"http://h:1|t7","menu":[{"label":"Diff","action":"diff","value":""},{"label":"Delete","action":"row-delete","value":"t7","danger":true}]},"projects":[]}"#);
@@ -498,6 +577,30 @@ mod tests {
             assert!(items.iter().any(|i| i.action == LOCAL_SOLIDCRAFT_OPEN && i.label == "Open in SolidCraft"), "{p}");
         }
         assert!(!link_items("board.kicad_pcb", true, None).iter().any(|i| i.action == LOCAL_SOLIDCRAFT_OPEN));
+    }
+    #[test] fn a_text_fields_menu_offers_what_it_can_do() {
+        let labels = |v: Vec<Item>| v.iter().map(|i| { assert_eq!(i.action, LOCAL_FIELD); (i.label.clone(), i.value.clone()) }).collect::<Vec<_>>();
+        let l = |a: &str, b: &str| (a.to_string(), b.to_string());
+        assert_eq!(labels(field_items(false, false)), [l("Paste", "paste")], "an empty field: Paste only");
+        assert_eq!(labels(field_items(false, true)), [l("Paste", "paste"), l("Select all", "all")], "no selection");
+        assert_eq!(labels(field_items(true, true)), [l("Cut", "cut"), l("Copy", "copy"), l("Paste", "paste"), l("Select all", "all")]);
+        for (lang, want) in [("ja", ["切り取り", "コピー", "貼り付け", "すべて選択"]), ("es", ["Cortar", "Copiar", "Pegar", "Seleccionar todo"])] {
+            crate::i18n::with_lang(lang, || assert_eq!(field_items(true, true).iter().map(|i| crate::i18n::trs(&i.label)).collect::<Vec<_>>(), want, "{lang}"));
+        }
+    }
+    #[test] fn a_right_click_on_a_message_with_nothing_selected_copies_it_or_selects_all() {
+        let v = message_items("R1 is the anode load.\n\nR2 biases the cathode.");
+        assert_eq!(v.iter().map(|i| (i.label.as_str(), i.action.as_str(), i.value.as_str())).collect::<Vec<_>>(),
+            [("Copy message", LOCAL_COPY, "R1 is the anode load.\n\nR2 biases the cathode."), ("Select all", LOCAL_SELECT_ALL, "")]);
+        assert_eq!(message_items("").iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), ["Select all"], "nothing to copy: Select all alone");
+        for (lang, want) in [("ja", ["メッセージをコピー", "すべて選択"]), ("es", ["Copiar mensaje", "Seleccionar todo"])] {
+            crate::i18n::with_lang(lang, || assert_eq!(message_items("x").iter().map(|i| crate::i18n::trs(&i.label)).collect::<Vec<_>>(), want, "{lang}"));
+        }
+    }
+    #[test] fn the_terminals_menu_copies_only_a_selection_and_always_pastes() {
+        let l = |v: Vec<Item>| v.into_iter().map(|i| { assert_eq!(i.action, LOCAL_TERM); (i.label, i.value) }).collect::<Vec<_>>();
+        assert_eq!(l(term_items(true)), [("Copy".to_string(), "copy".to_string()), ("Paste".to_string(), "paste".to_string())]);
+        assert_eq!(l(term_items(false)), [("Paste".to_string(), "paste".to_string())]);
     }
     #[test] fn selection_items_offer_copy_and_quote_when_non_empty() {
         assert!(selection_items("").is_empty());

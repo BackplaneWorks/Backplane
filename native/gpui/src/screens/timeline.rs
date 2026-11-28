@@ -1,7 +1,7 @@
 //! The timeline's text: Markdown blocks drawn as styled, wrapped, selectable text (selection runs across blocks and
 //! messages), links, code blocks with Copy and light highlighting, tables, and images. What to draw comes from the hub's
 //! nodes (screens::md); this file only lays them out and answers the pointer. The pure rules are in md.rs and select.rs.
-use super::{images::Slot, md::{self, Align, Block, Dim, Img, Inline, Link, ModelChip, Span, Tok, UserSeg}, select::{self, Pos, Selection, Text}};
+use super::{images::Slot, md::{self, Align, Block, Dim, Img, Inline, Link, ModelChip, Span, Tok, UserSeg}, select::{self, More, Pos, Selection, Text}};
 use crate::{art, theme, Backplane};
 use gpui::{prelude::*, *};
 use serde_json::Value;
@@ -34,11 +34,25 @@ pub struct Registry {
     pub design: Rc<super::xprobe::Design>,
     /// The window's app, for a command's Run in terminal (set each frame by the part that draws the rows).
     pub app: Option<WeakEntity<Backplane>>,
+    /// While a table row's cells are made: that row's number (`More::cell`), so a copy joins its cells by a tab; `cells` counts the rows made.
+    cell_row: Option<u64>, cells: u64,
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct KPos { pub entry: String, pub idx: usize, pub off: usize }
-pub struct Info { pub text: String, pub entry: usize, pub id: String, pub idx: usize, pub links: Vec<(Range<usize>, Link)>, pub copy_spans: Vec<(Range<usize>, String, SharedString)>, pub layout: Option<BlockLayout> }
+pub struct Info { pub text: String, pub entry: usize, pub id: String, pub idx: usize, pub links: Vec<(Range<usize>, Link)>, pub copy_spans: Vec<(Range<usize>, String, SharedString)>, pub layout: Option<BlockLayout>, pub more: More }
 pub type Reg = Rc<RefCell<Registry>>;
+/// The asks' cards (approval, question) under the timeline: their blocks are the rows' surface (a selection runs from the thread into them), kept
+/// apart by this prefix of their id and drawn after every row.
+pub const ASK_ID: &str = "ask:";
+pub const ASK_ROW: usize = usize::MAX / 2;
+/// Whether a block is on the surface asked for: the thread's rows and the asks' cards (`Some(true)`), the viewer's page or a project's README (`Some(false)`), any.
+fn in_scope(b: &Info, rows_only: Option<bool>) -> bool {
+    match rows_only {
+        Some(true) => !b.id.is_empty() && !b.id.starts_with("home-readme"),
+        Some(false) => b.id.is_empty() || b.id.starts_with("home-readme"),
+        None => true,
+    }
+}
 /// The viewer page's code blocks' Copy places are numbered from here (`copy:1000`...), the thread's rows' from 0: each part may draw without the other.
 pub const VIEWER_COPIES: usize = 1000;
 
@@ -48,7 +62,7 @@ impl Default for Registry {
             blocks: Vec::new(), dragging: false, entry: 0, click_seq: 0,
             drag_surface: None, drag_mode: DragMode::Char, drag_origin: None, drag_pos: None, drag_scrolling: false,
             entry_id: String::new(), idx: 0, keyed: None, sel: Selection::default(), copies: Vec::new(), copy_seen: 0,
-            hover: String::new(), design: Default::default(), app: None,
+            hover: String::new(), design: Default::default(), app: None, cell_row: None, cells: 0,
         }
     }
 }
@@ -60,10 +74,30 @@ impl Registry {
     /// code blocks' Copy places (numbered from VIEWER_COPIES). The rows' stay: their part (part.rs) may reuse its last frame.
     pub fn begin_outside(&mut self) { self.blocks.retain(|b| !b.id.is_empty()); self.copies.retain(|c| c.0 < VIEWER_COPIES); self.copy_seen = VIEWER_COPIES; self.idx = 0; self.entry = 0; self.entry_id.clear(); }
     /// The rows' part draws (or is gone): forget the rows' blocks and Copy places, keep the viewer's.
-    pub fn begin_rows(&mut self) { self.blocks.retain(|b| b.id.is_empty()); self.copies.retain(|c| c.0 >= VIEWER_COPIES); self.copy_seen = 0; self.idx = 0; self.entry = 0; self.entry_id.clear(); }
+    pub fn begin_rows(&mut self) { self.blocks.retain(|b| b.id.is_empty() || b.id.starts_with(ASK_ID)); self.copies.retain(|c| c.0 >= VIEWER_COPIES); self.copy_seen = 0; self.idx = 0; self.entry = 0; self.entry_id.clear(); }
     /// The list draws only the rows on screen, in its own order, and may draw one twice in a frame: the last drawing's blocks stand.
     pub fn enter(&mut self, row: usize, id: &str) { self.blocks.retain(|b| b.id != id); self.entry = row; self.entry_id = id.to_string(); self.idx = 0; }
     fn next_idx(&mut self) -> usize { let i = self.idx; self.idx += 1; i }
+    /// The asks' cards draw again (the window's own frame): what they drew last is gone.
+    pub fn begin_asks(&mut self) { self.blocks.retain(|b| !b.id.starts_with(ASK_ID)); }
+    /// Draw `f` as the blocks of `id` at `row`, then go on with the scope that was open (the asks' cards are made in the middle of the window's frame).
+    pub fn scoped<R>(reg: &Reg, row: usize, id: &str, f: impl FnOnce() -> R) -> R {
+        let saved = { let mut r = reg.borrow_mut(); let s = (r.entry, std::mem::take(&mut r.entry_id), r.idx); r.enter(row, id); s };
+        let out = f();
+        let mut r = reg.borrow_mut(); (r.entry, r.entry_id, r.idx) = saved; out
+    }
+    /// The block just made gets `more` (a cut activity row's whole text, its tightness).
+    pub fn mark_last(&mut self, more: More) { if let Some(b) = self.blocks.last_mut() { b.more = more; } }
+    /// The cells made from now on are one table row's (`false`: no longer in a table).
+    pub fn table_row(&mut self, on: bool) { self.cell_row = on.then(|| { self.cells += 1; self.cells }); }
+    /// Whether a window point is on a block of the surface itself (not in a margin, a gutter or a button between blocks): a double or triple click
+    /// selects only there.
+    pub fn inside(&self, p: Point<Pixels>, rows_only: bool) -> bool { self.blocks.iter().any(|b| in_scope(b, Some(rows_only)) && b.layout.as_ref().is_some_and(|l| l.bounds().contains(&p))) }
+    /// From the first block of the rows' surface to the end of its last: Select all.
+    pub fn rows_span(&self) -> Option<Selection> {
+        let first = self.blocks.iter().position(|b| in_scope(b, Some(true)))?; let last = self.blocks.iter().rposition(|b| in_scope(b, Some(true)))?;
+        Some(Selection { anchor: Pos { block: first, off: 0 }, head: Pos { block: last, off: self.blocks[last].text.len() } })
+    }
     /// The block with this identity, as drawn this frame.
     fn at(&self, id: &str, idx: usize) -> Option<usize> { self.blocks.iter().position(|b| b.id == id && b.idx == idx) }
     fn key(&self, p: Pos) -> Option<KPos> { let b = self.blocks.get(p.block)?; Some(KPos { entry: b.id.clone(), idx: b.idx, off: p.off.min(b.text.len()) }) }
@@ -126,28 +160,24 @@ impl Registry {
                 let text = rows[row]["text"].as_str().unwrap_or("").to_string(); let len = text.len(); let block = texts.len();
                 if row == ra { anchor = Some(Pos { block, off: if ra <= rh { 0 } else { len } }); }
                 if row == rh { head = Some(Pos { block, off: if rh < ra { 0 } else { len } }); }
-                texts.push(Text { text, entry: row });
+                texts.push(Text::new(text, row));
             } else {
                 for b in drawn {
                     if b.id == a.entry && b.idx == a.idx { anchor = Some(Pos { block: texts.len(), off: a.off }); }
                     if b.id == h.entry && b.idx == h.idx { head = Some(Pos { block: texts.len(), off: h.off }); }
-                    texts.push(Text { text: b.text.clone(), entry: row });
+                    texts.push(Text { text: b.text.clone(), entry: row, more: b.more.clone() });
                 }
             }
         }
         anchor.zip(head).map_or(String::new(), |(anchor, head)| select::extract(&texts, &Selection { anchor, head }))
     }
     pub fn anchor(&self) -> Selection { self.sel }
-    pub fn texts(&self) -> Vec<Text> { self.blocks.iter().map(|b| Text { text: b.text.clone(), entry: b.entry }).collect() }
+    pub fn texts(&self) -> Vec<Text> { self.blocks.iter().map(|b| Text { text: b.text.clone(), entry: b.entry, more: b.more.clone() }).collect() }
     /// The position under a window point: inside a block its character; elsewhere the nearest block, above it its start, below its end.
     pub fn hit(&self, p: Point<Pixels>) -> Option<Pos> { self.hit_scoped(p, None) }
     /// Like `hit`, optionally restricted to timeline row blocks (`Some(true)`) or doc/outside blocks (`Some(false)`).
     pub fn hit_scoped(&self, p: Point<Pixels>, rows_only: Option<bool>) -> Option<Pos> {
-        let matches = |b: &Info| match rows_only {
-            Some(true) => !b.id.is_empty() && !b.id.starts_with("home-readme"),
-            Some(false) => b.id.is_empty() || b.id.starts_with("home-readme"),
-            None => true,
-        };
+        let matches = |b: &Info| in_scope(b, rows_only);
         // the block under the point first (a table's cells share a row, so distance alone would pick the first), else the nearest
         let inside = self.blocks.iter().position(|b| matches(b) && b.layout.as_ref().map_or(false, |l| l.bounds().contains(&p)));
         let i = match inside {
@@ -167,15 +197,42 @@ impl Registry {
         };
         let l = self.blocks[i].layout.as_ref()?;
         let r = l.bounds(); let len = self.blocks[i].text.len();
-        let off = if p.y < r.top() { 0 } else if p.y > r.bottom() { len } else { match l.closest_index_for_position(p) { Ok(o) | Err(o) => o.min(len) } };
+        // at or past the right edge of a one-line block: its end (a row drawn cut to one line ends at its real end)
+        let one_line = r.size.height <= l.line_height() * 1.5;
+        let off = if p.y < r.top() { 0 } else if p.y > r.bottom() || (one_line && p.x >= r.right() - px(1.)) { len } else { match l.closest_index_for_position(p) { Ok(o) | Err(o) => o.min(len) } };
         Some(Pos { block: i, off })
+    }
+    /// A press of the left button at `p` (`pos`: where `hit_scoped` puts it): a click puts the caret there (Shift extends the selection), a double
+    /// click selects the word and a triple the block, and the drag that follows goes by the same unit. Only on a block itself: off every block
+    /// (a margin, a fold's head, a button) a double or triple click clears the selection as a click does. True when it picked text.
+    pub fn press(&mut self, p: Point<Pixels>, pos: Pos, clicks: usize, shift: bool, rows_only: bool) -> bool {
+        let texts = self.texts();
+        let direct = clicks < 2 || self.inside(p, rows_only);
+        match clicks {
+            2 if direct => {
+                let w = select::word_at(&texts[pos.block].text, pos.off);
+                self.select(Selection { anchor: Pos { block: pos.block, off: w.start }, head: Pos { block: pos.block, off: w.end } });
+                self.drag_mode = DragMode::Word; self.drag_origin = self.keyed.clone();
+            }
+            n if n >= 3 && direct => {
+                if let Some(s) = select::block_range(&texts, pos.block) { self.select(s); }
+                self.drag_mode = DragMode::Block; self.drag_origin = self.keyed.clone();
+            }
+            _ => {
+                if shift && direct { self.extend(pos); } else { self.select(Selection { anchor: pos, head: pos }); }
+                self.drag_mode = DragMode::Char; self.drag_origin = None;
+            }
+        }
+        self.dragging = true; self.drag_surface = Some(rows_only); self.drag_pos = Some(p);
+        clicks >= 2 && direct
     }
     pub fn link_at(&self, pos: Pos) -> Option<&Link> { self.blocks.get(pos.block)?.links.iter().find(|(r, _)| r.contains(&pos.off)).map(|(_, l)| l) }
     pub fn copy_span_at(&self, pos: Pos) -> Option<(String, SharedString)> { self.blocks.get(pos.block)?.copy_spans.iter().find(|(r, _, _)| r.contains(&pos.off)).map(|(_, t, id)| (t.clone(), id.clone())) }
 }
 
 #[derive(Clone, Copy, PartialEq)]
-pub enum Kind { Body, Quote, Code, Head }
+pub enum Kind { Body, Quote, Code, Head,
+    /** in the colour of what it is drawn in (a tool row's faint line, a card's dim detail, an error's red): a line that was plain text before */ Plain }
 
 /// A block of text that paints its own selection and reports its layout to the registry.
 pub struct SelText { spans: Vec<Span>, kind: Kind, light: bool, reg: Reg, id: String, idx: usize, styled: Option<StyledText>, tokens: Vec<(Range<usize>, Tok)>,
@@ -217,7 +274,7 @@ pub fn chip_hot(a: Point<Pixels>, b: Point<Pixels>, lh: Pixels, left: Pixels, ri
 impl SelText {
     pub fn new(reg: &Reg, spans: Vec<Span>, kind: Kind, light: bool) -> Self {
         let mut r = reg.borrow_mut();
-        let spans = if kind == Kind::Code || r.design.is_empty() { spans } else { super::xprobe::links(spans, &r.design) };
+        let spans = if kind == Kind::Code || kind == Kind::Plain || r.design.is_empty() { spans } else { super::xprobe::links(spans, &r.design) };
         let mut at = 0usize; let mut links = Vec::new();
         for s in &spans { if let Some(l) = &s.style.link { links.push((at..at + s.text.len(), l.clone())); } at += s.text.len(); }
         let entry = r.entry; let (id, idx) = (r.entry_id.clone(), r.next_idx());
@@ -235,7 +292,8 @@ impl SelText {
             }
             at += s.text.len();
         }
-        r.blocks.push(Info { text: md::plain(&spans), entry, id: id.clone(), idx, links, copy_spans, layout: None });
+        let more = More { cell: r.cell_row, ..More::default() };
+        r.blocks.push(Info { text: md::plain(&spans), entry, id: id.clone(), idx, links, copy_spans, layout: None, more });
         drop(r);
         let shaded = if kind == Kind::Code { Vec::new() } else { shaded(&spans) };
         Self { spans, kind, light, reg: reg.clone(), id, idx, styled: None, tokens: Vec::new(), chips, shaded }
@@ -265,7 +323,7 @@ impl SelText {
             // a link into Settings (an agent's "Open Settings › CAD"): drawn as a button, a filled label with no underline
             let button = s.style.link.as_ref().is_some_and(|l| l.href.starts_with("backplane://settings/") || l.href.starts_with("backplane://plan/"));
             if button { font.weight = FontWeight::BOLD; }
-            let color = if s.style.link.is_some() { c("accent") } else if self.kind == Kind::Quote || s.style.small { c("dim") } else { c("text") };
+            let color: Hsla = if s.style.link.is_some() { c("accent").into() } else if self.kind == Kind::Plain { base.color } else if self.kind == Kind::Quote || s.style.small { c("dim").into() } else { c("text").into() };
             runs.push(TextRun {
                 len: s.text.len(), font, color: color.into(),
                 // a code span's shade is painted under the selection by `paint` (shaded), not by the text: a run's own background covered the highlight
@@ -343,7 +401,9 @@ impl Element for SelText {
         let range = { let r = self.reg.borrow(); r.at(&self.id, self.idx).and_then(|o| r.sel.within(o, r.blocks[o].text.len())) };
         if let Some(range) = range {
             let tint = select::highlight(self.light);
-            if let (Some(pa), Some(pb)) = (layout.position_for_index(range.start), layout.position_for_index(range.end)) { for q in line_rects(pa, pb, lh, left, right) { window.paint_quad(fill(q, tint)); } }
+            // (an end past what a line cut short draws stands at its drawn end)
+            let at = |i: usize| layout.position_for_index(i).or_else(|| layout.position_for_index(layout.len()));
+            if let (Some(pa), Some(pb)) = (at(range.start), at(range.end)) { for q in line_rects(pa, pb, lh, left, right) { window.paint_quad(fill(q, tint)); } }
         }
         styled.paint(id, inspector, bounds, rl, &mut (), window, cx);
         for (h, style) in pre.iter() { window.set_cursor_style(*style, h); }
@@ -717,7 +777,7 @@ impl FlowText {
         }
         let entry = r.entry;
         let (id, idx) = (r.entry_id.clone(), r.next_idx());
-        r.blocks.push(Info { text: raw_text.to_string(), entry, id: id.clone(), idx, links, copy_spans: vec![], layout: None });
+        r.blocks.push(Info { text: raw_text.to_string(), entry, id: id.clone(), idx, links, copy_spans: vec![], layout: None, more: More::default() });
         drop(r);
         let hard_lines = split_hard_lines(&segs);
         Self { raw_text: raw_text.to_string(), hard_lines, light, reg: reg.clone(), id, idx, shaded, measured: Rc::new(RefCell::new(None)), layout: None }
@@ -990,6 +1050,13 @@ impl Element for FlowText {
 
 pub(crate) fn text(reg: &Reg, light: bool, spans: Vec<Span>, kind: Kind) -> AnyElement { SelText::new(reg, spans, kind, light).into_any_element() }
 fn plain_spans(s: &str) -> Vec<Span> { vec![Span { text: s.to_string(), style: Default::default() }] }
+/// A line that was plain text (a tool or activity row, an ask's words, a reply's Finished stamp), now selectable with the font and colour around it:
+/// `shown` as drawn, `whole` what a copy that runs to its end gives (a heredoc's first line is drawn, all of it is copied).
+pub(crate) fn line_text(reg: &Reg, light: bool, shown: String, whole: &str) -> AnyElement {
+    let more = More { whole: (!whole.is_empty() && whole != shown).then(|| whole.to_string()), tight: true, cell: None };
+    let el = SelText::new(reg, plain_spans(&shown), Kind::Plain, light).into_any_element();
+    reg.borrow_mut().mark_last(more); el
+}
 
 /// A person's message whose text may wrap gets the bubble's full width (640 px at most) instead of shrinking to its text: a shrink-to-fit
 /// parent let the layout measure the wrapping text at one width and paint it at another, so a long message was drawn over what follows it.
@@ -1100,11 +1167,17 @@ pub fn block_el(cx: &mut Context<Backplane>, reg: &Reg, light: bool, b: &Block, 
         }
         Block::Table { head, rows } => {
             let cols = head.len().max(rows.iter().map(Vec::len).max().unwrap_or(0)).max(1);
-            let row = |cells: &Vec<Vec<Span>>, bold: bool| div().flex().border_b_1().border_color(c("line")).children((0..cols).map(|i| {
-                let spans = cells.get(i).cloned().unwrap_or_default();
-                let spans = if bold { spans.into_iter().map(|mut s| { s.style.bold = true; s }).collect() } else { spans };
-                div().flex_1().min_w(px(60.)).px_2().py_1().child(text(reg, light, spans, Kind::Body)).into_any_element()
-            }).collect::<Vec<_>>());
+            // a row's cells are marked as one (`More::cell`): a copy joins them by a tab, rows by a newline, as a sheet takes them
+            let row = |cells: &Vec<Vec<Span>>, bold: bool| {
+                reg.borrow_mut().table_row(true);
+                let els = (0..cols).map(|i| {
+                    let spans = cells.get(i).cloned().unwrap_or_default();
+                    let spans = if bold { spans.into_iter().map(|mut s| { s.style.bold = true; s }).collect() } else { spans };
+                    div().flex_1().min_w(px(60.)).px_2().py_1().child(text(reg, light, spans, Kind::Body)).into_any_element()
+                }).collect::<Vec<_>>();
+                reg.borrow_mut().table_row(false);
+                div().flex().border_b_1().border_color(c("line")).children(els)
+            };
             let mut t = div().id(SharedString::from(format!("tbl-{key}"))).overflow_x_scroll().border_1().border_color(c("line")).flex().flex_col().text_size(crate::scale::tpx(12.5));
             if !head.is_empty() { t = t.child(row(head, true).bg(c("raise"))); }
             for r in rows.iter().take(500) { t = t.child(row(r, false)); }
@@ -1371,35 +1444,16 @@ impl Backplane {
         { let mut r = self.screens.reg.borrow_mut(); r.click_seq = r.click_seq.wrapping_add(1); }
         let Some(pos) = self.scoped_pos(e.position, rows_only) else { return };
         if e.button == MouseButton::Right {
-            // a selection's Copy and Quote first, then a link's own items
+            // a selection's Copy and Quote first, then a link's own items; with nothing selected, on a message's text: Copy message and Select all
             let link = self.screens.reg.borrow().link_at(pos).cloned();
-            let mut items = super::ctxmenu::selection_items(&self.timeline_selected());
+            let selected = self.timeline_selected();
+            let mut items = super::ctxmenu::selection_items(&selected);
+            if selected.is_empty() && rows_only && self.screens.reg.borrow().inside(e.position, true) { items = super::ctxmenu::message_items(&self.message_text_at(pos)); }
             if let Some(l) = link { let dl = self.link_download(pos.block, &l); items.extend(super::ctxmenu::link_items(&l.href, l.file, dl)); }
             if !items.is_empty() { self.ctx_open(e.position, items, cx); }
             return;
         }
-        let mut r = self.screens.reg.borrow_mut();
-        let texts = r.texts();
-        match e.click_count {
-            2 => {
-                let w = select::word_at(&texts[pos.block].text, pos.off);
-                r.select(Selection { anchor: Pos { block: pos.block, off: w.start }, head: Pos { block: pos.block, off: w.end } });
-                r.drag_mode = DragMode::Word; r.drag_origin = r.keyed.clone();
-            }
-            n if n >= 3 => {
-                if let Some(s) = select::block_range(&texts, pos.block) { r.select(s); }
-                r.drag_mode = DragMode::Block; r.drag_origin = r.keyed.clone();
-            }
-            _ => {
-                if e.modifiers.shift { r.extend(pos); } else { r.select(Selection { anchor: pos, head: pos }); }
-                r.drag_mode = DragMode::Char; r.drag_origin = None;
-            }
-        }
-        r.dragging = true;
-        r.drag_surface = Some(rows_only);
-        r.drag_pos = Some(e.position);
-        let picked = e.click_count >= 2;
-        drop(r);
+        let picked = self.screens.reg.borrow_mut().press(e.position, pos, e.click_count, e.modifiers.shift, rows_only);
         if picked { self.timeline_selection_made(window, cx); }
         self.notify_sel(rows_only, cx);
     }
@@ -1508,6 +1562,22 @@ impl Backplane {
         }
         self.timeline_selection_made(window, cx);
         self.notify_sel(rows_only, cx);
+    }
+    /// Select all (the right-click menu): every block of the thread's rows on screen, and the asks' cards under them.
+    pub(crate) fn timeline_select_all(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let all = self.screens.reg.borrow().rows_span();
+        if let Some(s) = all { self.screens.reg.borrow_mut().select(s); self.timeline_selection_made(window, cx); }
+        self.notify_sel(true, cx);
+    }
+    /// The whole text of the message (or tool row, or ask) a block belongs to, as its Copy button gives it: the row's text from the hub, else the
+    /// message's drawn blocks.
+    fn message_text_at(&self, pos: Pos) -> String {
+        let r = self.screens.reg.borrow();
+        let Some(id) = r.blocks.get(pos.block).map(|b| b.id.clone()) else { return String::new() };
+        let from_hub = if let Some(ask) = id.strip_prefix(super::timeline::ASK_ID) { super::asks::copy_text(&self.data["thread"]["asks"], ask) }
+            else { self.active_rows().iter().find(|e| e["id"].as_str() == Some(id.as_str())).map(|e| crate::string(e, "text")).unwrap_or_default() };
+        if !from_hub.is_empty() { return from_hub }
+        r.blocks.iter().filter(|b| b.id == id).map(|b| b.more.whole.clone().unwrap_or_else(|| b.text.clone())).collect::<Vec<_>>().join("\n")
     }
     /// A selection was made in the timeline (a drag, a double or a triple click): it is the PRIMARY selection on Linux (middle-click paste in
     /// other programs), and the copy chord (Ctrl+C, Cmd+C on a Mac) copies it from now on, wherever the keyboard was (`copy_claim`).
@@ -1691,7 +1761,7 @@ mod tests {
         assert!(bubble_full_width("add these", &serde_json::json!([{"image": true, "url": "/a.png", "path": "a.png"}, {"image": true, "url": "/b.png", "path": "b.png"}])));
         assert!(!bubble_full_width("add these", &serde_json::json!([{"label": "notes.txt", "path": "notes.txt"}])));
     }
-    fn info(id: &str, idx: usize, text: &str) -> Info { Info { text: text.into(), entry: id[1..].parse().unwrap_or(0), id: id.into(), idx, links: vec![], copy_spans: vec![], layout: None } }
+    fn info(id: &str, idx: usize, text: &str) -> Info { Info { text: text.into(), entry: id[1..].parse().unwrap_or(0), id: id.into(), idx, links: vec![], copy_spans: vec![], layout: None, more: More::default() } }
     fn frame(r: &mut Registry, blocks: &[(&str, usize, &str)]) { r.begin(); for (id, idx, t) in blocks { r.blocks.push(info(id, *idx, t)); } r.resolve(); }
     #[test] fn a_code_span_is_shaded_by_paint_under_the_selection_not_by_its_run() {
         // the person selected a list item over an inline command and saw no highlight on the command: its run's own background covered it
@@ -1720,11 +1790,49 @@ mod tests {
     }
     #[test] fn the_root_and_the_rows_part_forget_only_their_own_blocks() {
         // the rows' part may reuse its last frame while the root draws again (part.rs): the root's frame keeps the rows' blocks, and the other way round
-        let outside = |t: &str| Info { text: t.into(), entry: 0, id: String::new(), idx: 0, links: vec![], copy_spans: vec![], layout: None };
+        let outside = |t: &str| Info { text: t.into(), entry: 0, id: String::new(), idx: 0, links: vec![], copy_spans: vec![], layout: None, more: More::default() };
         let mut r = Registry::default(); r.begin();
         r.blocks.push(outside("review")); r.blocks.push(info("e1", 0, "one")); r.blocks.push(info("e2", 0, "two"));
         r.begin_outside(); assert_eq!(r.blocks.iter().map(|b| b.text.as_str()).collect::<Vec<_>>(), ["one", "two"]);
         r.blocks.push(outside("review again")); r.begin_rows(); assert_eq!(r.blocks.iter().map(|b| b.text.as_str()).collect::<Vec<_>>(), ["review again"]);
+    }
+    // a double click on a fold's head, the gutter or the Working row lit up a word of the bubble above (the nearest block)
+    #[test] fn a_double_click_selects_only_on_text_and_a_click_off_it_still_finds_the_nearest() {
+        let laid = |id: &str, t: &str, y: f32| Info { layout: Some(BlockLayout::Flow(FlowLayout { bounds: Bounds { origin: point(px(400.), px(y)), size: size(px(500.), px(20.)) }, line_height: px(20.), text_len: t.len(), lines: vec![] })), ..info(id, 0, t) };
+        let mut r = Registry::default(); r.begin(); r.blocks.push(laid("e1", "alpha beta", 100.)); r.blocks.push(laid("e2", "gamma", 200.));
+        let fold = point(px(500.), px(150.));
+        assert!(!r.inside(fold, true) && r.inside(point(px(450.), px(110.)), true) && !r.inside(point(px(450.), px(110.)), false), "the rows' blocks only");
+        let pos = r.hit_scoped(fold, Some(true)).unwrap();
+        assert!(!r.press(fold, pos, 2, false, true), "nothing picked"); assert!(r.sel.collapsed()); assert_eq!(select::extract(&r.texts(), &r.sel), "");
+        assert!(!r.press(fold, pos, 3, false, true)); assert!(r.sel.collapsed(), "a triple click off the text: nothing either");
+        let on = point(px(450.), px(110.)); let at = r.hit_scoped(on, Some(true)).unwrap();
+        assert!(r.press(on, at, 2, false, true)); assert_eq!(select::extract(&r.texts(), &r.sel), "alpha", "on the text: its word");
+        assert!(r.press(on, at, 3, false, true)); assert_eq!(select::extract(&r.texts(), &r.sel), "alpha beta", "and its block");
+        // a single click in the margin starts a selection at the nearest block, as before (a drag from the gutter)
+        let margin = point(px(380.), px(205.)); let near = r.hit_scoped(margin, Some(true)).unwrap(); assert_eq!(near.block, 1);
+        assert!(!r.press(margin, near, 1, false, true)); assert!(r.dragging); r.extend_drag(Pos { block: 1, off: 3 }); assert_eq!(select::extract(&r.texts(), &r.sel), "gam");
+        // past the right edge of a one-line block: its end (a row cut short copies to its real end)
+        assert_eq!(r.hit_scoped(point(px(950.), px(210.)), Some(true)), Some(Pos { block: 1, off: 5 }));
+    }
+    #[test] fn the_asks_cards_blocks_stay_when_the_rows_draw_and_go_when_the_cards_draw_again() {
+        let reg: Reg = Default::default(); { let mut r = reg.borrow_mut(); r.begin(); r.enter(4, "e4"); }
+        let el = Registry::scoped(&reg, ASK_ROW, &format!("{ASK_ID}a1"), || { line_text(&reg, false, "rm -rf build/".into(), "") });
+        drop(el);
+        { let r = reg.borrow(); assert_eq!((r.entry_id.as_str(), r.entry), ("e4", 4), "the scope that was open goes on"); assert_eq!(r.blocks.len(), 1); assert!(r.blocks[0].more.tight); }
+        reg.borrow_mut().begin_rows(); assert_eq!(reg.borrow().blocks.len(), 1, "the rows' part drawing keeps the cards' text");
+        reg.borrow_mut().begin_asks(); assert!(reg.borrow().blocks.is_empty());
+        let _ = line_text(&reg, false, "cat <<EOF \u{2026}".into(), "cat <<EOF\nx\nEOF"); assert_eq!(reg.borrow().blocks[0].more.whole.as_deref(), Some("cat <<EOF\nx\nEOF"));
+        let _ = line_text(&reg, false, "ls".into(), "ls"); assert_eq!(reg.borrow().blocks[1].more.whole, None, "drawn whole: nothing more");
+    }
+    #[test] fn a_tables_cells_are_marked_by_row() {
+        let reg: Reg = Default::default(); reg.borrow_mut().begin();
+        let sp = |t: &str| vec![Span { text: t.into(), style: Default::default() }];
+        let _ = text(&reg, false, sp("before"), Kind::Body);
+        reg.borrow_mut().table_row(true); for t in ["R1", "100k"] { let _ = text(&reg, false, sp(t), Kind::Body); }
+        reg.borrow_mut().table_row(true); for t in ["R2", "1k5"] { let _ = text(&reg, false, sp(t), Kind::Body); }
+        reg.borrow_mut().table_row(false); let _ = text(&reg, false, sp("after"), Kind::Body);
+        let r = reg.borrow(); let all = Selection { anchor: Pos { block: 0, off: 0 }, head: Pos { block: 5, off: 5 } };
+        assert_eq!(select::extract(&r.texts(), &all), "before\nR1\t100k\nR2\t1k5\nafter");
     }
     #[test] fn a_row_drawn_twice_in_a_frame_stands_once() {
         let mut r = Registry::default(); r.begin();

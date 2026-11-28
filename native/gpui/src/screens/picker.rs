@@ -675,7 +675,7 @@ fn plan_once_row(cx: &mut Context<Backplane>, light: bool, thread: &Value) -> Op
         })).into_any_element())
 }
 /// A hover with the whole text of a row, for what the row had to cut short.
-fn tip_of(text: String, light: bool) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static { move |_, cx| cx.new(|_| super::combo::Tip(text.clone(), light)).into() }
+fn tip_of(text: String, light: bool) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static { move |w, cx| { let at = w.mouse_position(); cx.new(|_| super::combo::Tip::new(text.clone(), light, at)).into() } }
 
 impl Backplane {
     /// The model chip or its key: open or shut the menu; opening clears the search and puts the keyboard in it.

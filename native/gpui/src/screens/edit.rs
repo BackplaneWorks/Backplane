@@ -10,10 +10,16 @@ struct Snap { text: String, anchor: usize, head: usize }
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Kind { Type, Delete, Other }
 
+/// What a mouse drag extends by: a double click drags word by word, a triple click line by line.
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub enum Unit { #[default] Char, Word, Line }
+
 #[derive(Debug, Clone)]
 pub struct Editor {
     text: String, anchor: usize, head: usize,
     undo: Vec<Snap>, redo: Vec<Snap>, last: Kind,
+    /// The drag unit and what the double or triple click selected (`drag_to` always keeps it selected).
+    unit: Unit, origin: Range<usize>,
     /// IME composition range, replaced by the next commit.
     pub marked: Option<Range<usize>>,
 }
@@ -23,7 +29,7 @@ const HISTORY: usize = 200;
 impl Default for Editor { fn default() -> Self { Self::new("") } }
 
 impl Editor {
-    pub fn new(text: &str) -> Self { let n = text.len(); Self { text: text.into(), anchor: n, head: n, undo: vec![], redo: vec![], last: Kind::Other, marked: None } }
+    pub fn new(text: &str) -> Self { let n = text.len(); Self { text: text.into(), anchor: n, head: n, undo: vec![], redo: vec![], last: Kind::Other, marked: None, unit: Unit::Char, origin: 0..0 } }
     pub fn text(&self) -> &str { &self.text }
     pub fn head(&self) -> usize { self.head }
     pub fn selection(&self) -> Range<usize> { self.anchor.min(self.head)..self.anchor.max(self.head) }
@@ -121,15 +127,32 @@ impl Editor {
         self.text[start..end].char_indices().nth(col).map_or(end, |(k, _)| start + k)
     }
     pub fn select_all(&mut self) { self.anchor = 0; self.head = self.text.len(); }
-    pub fn place(&mut self, offset: usize, extend: bool) { let o = self.clamp(offset); self.go(o, extend); }
+    /// A click (`extend` false) drags by character again; Shift extends with whatever unit is in force.
+    pub fn place(&mut self, offset: usize, extend: bool) { let o = self.clamp(offset); if !extend { self.unit = Unit::Char; } self.go(o, extend); }
+    /// Shift+click: extend to `offset` by character, whatever the last multi-click was.
+    pub fn extend_chars(&mut self, offset: usize) { self.unit = Unit::Char; self.place(offset, true); }
+    pub fn unit(&self) -> Unit { self.unit }
     fn clamp(&self, mut o: usize) -> usize { o = o.min(self.text.len()); while !self.text.is_char_boundary(o) { o -= 1; } o }
     /// Double click: the word under `offset`; triple click: its line.
     pub fn select_word_at(&mut self, offset: usize) {
         let o = self.clamp(offset);
-        for (k, w) in self.text.split_word_bound_indices() { if o >= k && o <= k + w.len() && w.chars().any(char::is_alphanumeric) { self.anchor = k; self.head = k + w.len(); return; } }
-        self.anchor = o; self.head = o;
+        let r = self.word_range(o).unwrap_or(o..o);
+        self.anchor = r.start; self.head = r.end; self.unit = Unit::Word; self.origin = r;
     }
-    pub fn select_line_at(&mut self, offset: usize) { let o = self.clamp(offset); self.anchor = self.line_start(o); self.head = self.line_end(o); }
+    pub fn select_line_at(&mut self, offset: usize) { let o = self.clamp(offset); let r = self.line_start(o)..self.line_end(o); self.anchor = r.start; self.head = r.end; self.unit = Unit::Line; self.origin = r; }
+    /// The word a double click at `o` (a char boundary) selects; None on spaces or punctuation.
+    fn word_range(&self, o: usize) -> Option<Range<usize>> {
+        self.text.split_word_bound_indices().find(|(k, w)| o >= *k && o <= k + w.len() && w.chars().any(char::is_alphanumeric)).map(|(k, w)| k..k + w.len())
+    }
+    /// A mouse drag to `offset`: by character after a click, else the union of the double/triple click's origin and the word or line
+    /// under the pointer, the head on the far side from the origin. A selection change, not an edit (no undo step).
+    pub fn drag_to(&mut self, offset: usize) {
+        let o = self.clamp(offset);
+        let r = match self.unit { Unit::Char => return self.place(o, true), Unit::Word => self.word_range(o).unwrap_or(o..o), Unit::Line => self.line_start(o)..self.line_end(o) };
+        let g = self.origin.clone();
+        (self.anchor, self.head) = if r.start < g.start { (g.end, r.start) } else if r.end > g.end { (g.start, r.end) } else { (g.start, g.end) };
+        self.last = Kind::Other;
+    }
 
     pub fn backspace(&mut self, word: bool) {
         let sel = self.selection();
@@ -221,6 +244,36 @@ mod tests {
         e.select_word_at(7); assert_eq!(e.selected(), "beta");
         e.select_line_at(7); assert_eq!(e.selected(), "alpha beta");
         e.select_line_at(13); assert_eq!(e.selected(), "gamma");
+    }
+    // a double click then a drag extends word by word, a triple click line by line, always keeping what the click selected
+    #[test] fn a_drag_after_a_double_click_extends_by_words() {
+        let mut e = Editor::new("alpha beta gamma delta");
+        e.select_word_at(7); assert_eq!(e.selected(), "beta"); assert_eq!(e.unit(), Unit::Word);
+        e.drag_to(19); assert_eq!(e.selected(), "beta gamma delta");
+        e.drag_to(2); assert_eq!(e.selected(), "alpha beta"); assert_eq!(e.head(), 0, "the head on the far side");
+        e.drag_to(8); assert_eq!(e.selected(), "beta");
+        e.drag_to(16); assert_eq!(e.selected(), "beta gamma", "on the space after a word: its end");
+        assert!(!e.undo(), "a drag is no undo step");
+    }
+    #[test] fn a_drag_after_a_triple_click_extends_by_lines() {
+        let mut e = Editor::new("one two\nthree four\nfive");
+        e.select_line_at(2); assert_eq!(e.selected(), "one two");
+        e.drag_to(21); assert_eq!(e.selected(), "one two\nthree four\nfive");
+        e.drag_to(1); assert_eq!(e.selected(), "one two");
+        e.select_line_at(21); e.drag_to(3); assert_eq!(e.selected(), "one two\nthree four\nfive"); assert_eq!(e.head(), 0);
+    }
+    #[test] fn a_click_after_a_double_click_drags_by_character_again() {
+        let mut e = Editor::new("alpha beta gamma");
+        e.select_word_at(7); e.place(1, false); assert_eq!(e.unit(), Unit::Char);
+        e.drag_to(8); assert_eq!(e.selected(), "lpha be");
+        e.select_word_at(7); e.extend_chars(13); assert_eq!(e.unit(), Unit::Char); e.drag_to(12); assert_eq!(e.selected(), "beta g");
+        e.set("x"); assert_eq!(e.unit(), Unit::Char);
+    }
+    #[test] fn a_word_drag_over_multi_byte_text_stays_on_char_boundaries() {
+        let mut e = Editor::new("héllo wörld");
+        for o in 0..=e.text().len() + 2 { e.select_word_at(o); for p in 0..=e.text().len() + 2 { e.drag_to(p); assert!(e.text().is_char_boundary(e.head())); let _ = e.selected(); } }
+        e.select_word_at(2); assert_eq!(e.selected(), "héllo"); e.drag_to(9); assert_eq!(e.selected(), "héllo wörld");
+        e.select_line_at(3); e.drag_to(99); assert_eq!(e.selected(), "héllo wörld");
     }
     #[test] fn home_end_and_shift_extend_within_a_line() {
         let mut e = typed("ab\ncdef"); e.left(false, false); e.left(false, false);

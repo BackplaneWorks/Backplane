@@ -3,6 +3,7 @@
 //! Copy / Expand / Implement / inline Revise / Dismiss), standard permission/input cards, settings
 //! proposals, and buy-thread "Backplane needs" cards.
 use super::composer::{Composer, ComposerEvent};
+use super::timeline::{line_text, Reg, Registry, ASK_ID, ASK_ROW};
 use crate::{hub::Command, i18n::trs, string, theme, ui::{ic, with_rect}, Backplane};
 use gpui::{prelude::*, *};
 use serde_json::Value;
@@ -74,6 +75,8 @@ fn pill(cx: &mut Context<Backplane>, light: bool, key: String, rect: String, b: 
     }))
 }
 
+/// What Copy message gives for the ask `id` of the hub's asks (its words as the card's Copy would).
+pub fn copy_text(asks: &Value, id: &str) -> String { parse(asks).iter().find(|a| a.id == id).map(copy_text_of).unwrap_or_default() }
 fn copy_text_of(ask: &Ask) -> String {
     if !ask.raw.is_empty() { return ask.raw.clone() }
     if !ask.detail.is_empty() { return ask.detail.clone() }
@@ -197,12 +200,16 @@ pub fn escape_revise(app: &mut Backplane, cx: &mut Context<Backplane>) -> bool {
     true
 }
 
-fn card(cx: &mut Context<Backplane>, light: bool, input: Option<Entity<Composer>>, ask: &Ask, i: usize, expanded: bool, revising: bool) -> AnyElement {
+fn card(cx: &mut Context<Backplane>, reg: &Reg, light: bool, input: Option<Entity<Composer>>, ask: &Ask, i: usize, expanded: bool, revising: bool) -> AnyElement {
     if ask.kind == "plan" { return plan_card(cx, light, input, ask, i, expanded, revising) }
     let c = |n: &str| theme::color(light, n);
     let rail = if ask.needs { "accent" } else { "bad" };
     let mut col = div().flex_1().min_w_0().flex().flex_col().gap_2().p_3();
-    let mut head = div().flex().items_center().child(div().flex_1().font_weight(FontWeight::BOLD).text_size(crate::scale::tpx(13.)).text_color(if ask.needs { c("accent") } else { c("text") }).child(trs(&ask.head)));
+    // the question and the command or detail it asks about are selectable text, after the thread's rows (a selection runs into them)
+    let (head_text, detail_text) = Registry::scoped(reg, ASK_ROW + i, &format!("{ASK_ID}{}", ask.id), || {
+        (line_text(reg, light, trs(&ask.head), ""), (ask.blocks.is_empty() && !ask.detail.is_empty()).then(|| line_text(reg, light, ask.detail.clone(), "")))
+    });
+    let mut head = div().flex().items_center().child(div().flex_1().font_weight(FontWeight::BOLD).text_size(crate::scale::tpx(13.)).text_color(if ask.needs { c("accent") } else { c("text") }).child(head_text));
     if let Some(skip) = &ask.skip {
         let v = skip.value.clone();
         head = head.child(div().id(SharedString::from(format!("ask-{i}-skip"))).text_size(crate::scale::tpx(11.)).text_color(c("dim")).cursor_pointer().hover(|s| s.text_color(c("text"))).child(trs(&skip.label))
@@ -211,8 +218,8 @@ fn card(cx: &mut Context<Backplane>, light: bool, input: Option<Entity<Composer>
     col = col.child(head);
     if !ask.blocks.is_empty() {
         col = col.child(div().id(SharedString::from(format!("ask-{i}-body"))).max_h(px(220.)).overflow_y_scroll().flex().flex_col().gap_1().children(ask.blocks.iter().map(|b| crate::ui::block(b, light, 0))));
-    } else if !ask.detail.is_empty() {
-        col = col.child(div().id(SharedString::from(format!("ask-{i}-detail"))).max_h(px(300.)).overflow_y_scroll().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(ask.detail.clone()));
+    } else if let Some(detail) = detail_text {
+        col = col.child(div().id(SharedString::from(format!("ask-{i}-detail"))).max_h(px(300.)).overflow_y_scroll().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(detail));
     }
     let chips = div().flex().flex_wrap().gap_2().children(ask.buttons.iter().enumerate().map(|(j, b)| pill(cx, light, format!("ask-{i}-b{j}"), format!("ask:{i}:{j}"), b, false).into_any_element()).collect::<Vec<_>>());
     if let (true, Some(input)) = (ask.needs && !ask.pre.is_empty(), input) {
@@ -267,11 +274,15 @@ pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
 }
 
 /// The asks card stack above the composer, scrolling when tall; none when the thread has no open ask.
-pub fn view(cx: &mut Context<Backplane>, light: bool, inputs: &std::collections::HashMap<String, Entity<Composer>>, asks: &Value, expanded: &HashSet<String>, revising: Option<&str>) -> Option<AnyElement> {
+/// Their text is on the timeline's surface (`timeline_down`): drag, double and triple click, Shift+click, right-click Copy; the buttons work as before.
+pub fn view(cx: &mut Context<Backplane>, reg: &Reg, light: bool, inputs: &std::collections::HashMap<String, Entity<Composer>>, asks: &Value, expanded: &HashSet<String>, revising: Option<&str>) -> Option<AnyElement> {
+    reg.borrow_mut().begin_asks();
     let asks = parse(asks);
     if asks.is_empty() { return None; }
-    let cards: Vec<AnyElement> = asks.iter().enumerate().map(|(i, a)| card(cx, light, inputs.get(&a.id).cloned(), a, i, expanded.contains(&a.id), revising == Some(a.id.as_str()))).collect();
-    Some(div().id("asks").max_h(px(620.)).overflow_y_scroll().flex().flex_col().gap_2().children(cards).into_any_element())
+    let cards: Vec<AnyElement> = asks.iter().enumerate().map(|(i, a)| card(cx, reg, light, inputs.get(&a.id).cloned(), a, i, expanded.contains(&a.id), revising == Some(a.id.as_str()))).collect();
+    Some(div().id("asks").max_h(px(620.)).overflow_y_scroll().flex().flex_col().gap_2().children(cards)
+        .on_mouse_down(MouseButton::Left, cx.listener(|this, e, w, cx| this.timeline_down(e, w, cx))).on_mouse_down(MouseButton::Right, cx.listener(|this, e, w, cx| this.timeline_down(e, w, cx)))
+        .on_mouse_move(cx.listener(|this, e, _, cx| this.timeline_move(e, cx))).into_any_element())
 }
 
 #[cfg(test)]
